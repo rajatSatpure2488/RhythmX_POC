@@ -1,0 +1,3 @@
+# Sample patient dataset placeholder
+# Replace with actual synthetic FHIR patient ZIP for testing
+# Expected contents: patient.json + 12 resource files
