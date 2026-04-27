@@ -1,11 +1,46 @@
-# schemas.py
-# Pydantic v2 models for all request/response schemas
-#
-# Auth schemas: AuthRequest, ManualTokenRequest, AuthStatusResponse
-# Upload schemas: UploadResponse, PatientSummary, ResourceInventory
-# Mapping schemas: FieldMappingResult, MappingReport, MappingSummary
-# DryRun schemas: DryRunRequest, DryRunReport, ValidationResult, EdgeCase, APIUsageEstimate
-# Push schemas: PushRequest, PushResults, FailedRow
-# Resource schemas: one per FHIR resource (13 total)
+"""
+MediSync — Pydantic Schemas (Stage 1)
+All request/response models for the auth layer.
+"""
 
-# TODO: implement
+from pydantic import BaseModel, Field
+from typing import Optional
+
+
+# ── Auth ──────────────────────────────────────────────────
+
+class ManualTokenRequest(BaseModel):
+    access_token: str = Field(..., description="DrChrono Bearer access token")
+    doctor_id: str    = Field(..., description="DrChrono doctor profile ID")
+
+
+class OAuthInitiateResponse(BaseModel):
+    auth_url: str     = Field(..., description="Full DrChrono OAuth authorization URL")
+
+
+class AuthStatusResponse(BaseModel):
+    connected:      bool            = False
+    doctor_id:      Optional[str]   = None
+    doctor_name:    Optional[str]   = None
+    target_system:  str             = "DrChrono EHR"
+    expires_in:     Optional[int]   = None   # seconds remaining
+    last_handshake: Optional[str]   = None   # "HH:MM PST" string
+    error:          Optional[str]   = None
+
+
+class TokenData(BaseModel):
+    access_token:  str
+    refresh_token: Optional[str] = None
+    expires_at:    float          # Unix timestamp
+    doctor_id:     Optional[str] = None
+    doctor_name:   Optional[str] = None
+    target_system: str = "DrChrono EHR"
+
+
+# ── Upload (stubs for later stages) ───────────────────────
+
+class UploadResponse(BaseModel):
+    success:        bool
+    patient_id:     Optional[str] = None
+    resource_count: int           = 0
+    message:        Optional[str] = None

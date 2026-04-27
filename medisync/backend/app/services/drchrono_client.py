@@ -1,8 +1,150 @@
-# drchrono_client.py
-# HTTP client wrapper for DrChrono EHR REST API
-# Base URL: https://app.drchrono.com/api
-# All requests include: Authorization: Bearer <token>
-# Methods: get(), post(), patch(), delete()
-# Error handling: HTTP 4xx/5xx → structured DrChronoAPIError
+"""
+MediSync — DrChrono HTTP Client
+Synchronous wrapper using requests (proven pattern from reference integration).
+Handles token exchange, refresh, and user/doctor profile fetching.
+"""
 
-# TODO: implement
+import requests
+from typing import Dict, Optional
+from fastapi import HTTPException
+
+from app.core import config
+
+
+class DrChronoClient:
+    """Wraps all DrChrono REST API calls."""
+
+    def get_authorization_url(self, scope: str) -> str:
+        """Build the DrChrono OAuth authorization URL."""
+        from urllib.parse import urlencode
+        if not config.DRCHRONO_CLIENT_ID:
+            raise HTTPException(status_code=500, detail="DRCHRONO_CLIENT_ID not configured")
+        if not config.DRCHRONO_REDIRECT_URI:
+            raise HTTPException(status_code=500, detail="DRCHRONO_REDIRECT_URI not configured")
+
+        params = {
+            "response_type": "code",
+            "client_id":     config.DRCHRONO_CLIENT_ID,
+            "redirect_uri":  config.DRCHRONO_REDIRECT_URI,
+            "scope":         scope,
+        }
+        return f"{config.DRCHRONO_AUTH_URL}?{urlencode(params)}"
+
+    def exchange_code(self, auth_code: str) -> Dict:
+        """Exchange an authorization code for access + refresh tokens."""
+        payload = {
+            "grant_type":    "authorization_code",
+            "code":          auth_code,
+            "redirect_uri":  config.DRCHRONO_REDIRECT_URI,
+            "client_id":     config.DRCHRONO_CLIENT_ID,
+            "client_secret": config.DRCHRONO_CLIENT_SECRET,
+        }
+        headers = {"Content-Type": "application/x-www-form-urlencoded"}
+
+        response = requests.post(
+            config.DRCHRONO_TOKEN_URL,
+            data=payload,
+            headers=headers,
+            timeout=30,
+        )
+        if response.status_code != 200:
+            try:
+                err = response.json()
+                detail = err.get("error_description", err.get("error", response.text))
+            except Exception:
+                detail = response.text
+            raise HTTPException(status_code=502, detail=f"Token exchange failed: {detail}")
+
+        return response.json()
+
+    def refresh_token(self, refresh_token: str) -> Dict:
+        """Get a new access token using a refresh token."""
+        payload = {
+            "grant_type":    "refresh_token",
+            "refresh_token": refresh_token,
+            "client_id":     config.DRCHRONO_CLIENT_ID,
+            "client_secret": config.DRCHRONO_CLIENT_SECRET,
+        }
+        headers = {"Content-Type": "application/x-www-form-urlencoded"}
+
+        response = requests.post(
+            config.DRCHRONO_TOKEN_URL,
+            data=payload,
+            headers=headers,
+            timeout=30,
+        )
+        if response.status_code != 200:
+            raise HTTPException(status_code=502, detail=f"Token refresh failed: {response.text}")
+        return response.json()
+
+    def get_current_user(self, access_token: str) -> Dict:
+        """Fetch the currently authenticated user profile."""
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type":  "application/json",
+        }
+        response = requests.get(
+            f"{config.DRCHRONO_API_BASE}users/current",
+            headers=headers,
+            timeout=30,
+        )
+        if response.status_code != 200:
+            raise HTTPException(
+                status_code=response.status_code,
+                detail="Failed to fetch DrChrono user info",
+            )
+        return response.json()
+
+    def get_doctor_profile(self, access_token: str, user_id: str) -> Optional[Dict]:
+        """Fetch the doctor profile linked to a user ID."""
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type":  "application/json",
+        }
+        response = requests.get(
+            f"{config.DRCHRONO_API_BASE}doctors",
+            headers=headers,
+            params={"user": user_id},
+            timeout=30,
+        )
+        if response.status_code != 200:
+            return None
+        results = response.json().get("results", [])
+        return results[0] if results else None
+
+    def get_patients(
+        self,
+        access_token: str,
+        limit: int = 50,
+        offset: int = 0,
+        search: Optional[str] = None,
+    ):
+        """Fetch patient list from DrChrono."""
+        headers = {"Authorization": f"Bearer {access_token}"}
+        params  = {"limit": limit, "offset": offset}
+        if search:
+            params["search"] = search
+
+        response = requests.get(
+            f"{config.DRCHRONO_API_BASE}patients",
+            headers=headers,
+            params=params,
+            timeout=30,
+        )
+        response.raise_for_status()
+        return response.json().get("results", [])
+
+    def get_patient_by_id(self, access_token: str, patient_id: str) -> Dict:
+        """Get a single patient by ID."""
+        headers = {"Authorization": f"Bearer {access_token}"}
+        response = requests.get(
+            f"{config.DRCHRONO_API_BASE}patients/{patient_id}",
+            headers=headers,
+            timeout=30,
+        )
+        response.raise_for_status()
+        return response.json()
+
+
+# Singleton — import and use this everywhere
+drchrono_client = DrChronoClient()

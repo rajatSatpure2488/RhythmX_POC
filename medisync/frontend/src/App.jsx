@@ -1,9 +1,16 @@
-// App.jsx
-// Root React application component
-// Wraps the app with: AuthContext, DatasetContext providers
-// Renders: <Dashboard /> as the sole page (single-page app)
-// Routing: React Router (add if multi-page needed in future)
+import { AuthProvider }    from './context/AuthContext'
+import { DatasetProvider } from './context/DatasetContext'
+import { ApiRateProvider } from './context/ApiRateContext'
+import Dashboard from './pages/Dashboard'
 
 export default function App() {
-  return null; // TODO: implement
+  return (
+    <AuthProvider>
+      <ApiRateProvider>
+        <DatasetProvider>
+          <Dashboard />
+        </DatasetProvider>
+      </ApiRateProvider>
+    </AuthProvider>
+  )
 }
