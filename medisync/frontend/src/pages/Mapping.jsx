@@ -50,23 +50,30 @@ function mapRecord(record, resourceKey) {
   const mappedFields = {}
   const unmappedRequired = []
 
+  // Map required fields
   for (const req of schema.required) {
     const match = matchField(req, srcKeys) || srcKeys.find(k => k === req)
-    if (match !== undefined && match !== null) {
-      const val = record[match] || record[req]
-      if (val !== null && val !== undefined && val !== '') {
-        mappedFields[req] = val
-      } else {
-        unmappedRequired.push({ field: req, reason: 'null_value', src: match || req })
-      }
+    const val = match !== undefined && match !== null ? record[match] : record[req]
+    if (val !== null && val !== undefined && val !== '') {
+      mappedFields[req] = val
     } else {
-      unmappedRequired.push({ field: req, reason: 'field_missing', src: req })
+      unmappedRequired.push({ field: req, reason: 'null_value', src: match || req })
+    }
+  }
+
+  // Map optional fields
+  for (const opt of schema.optional) {
+    const match = matchField(opt, srcKeys) || srcKeys.find(k => k === opt)
+    const val = match !== undefined && match !== null ? record[match] : record[opt]
+    if (val !== null && val !== undefined && val !== '') {
+      mappedFields[opt] = val
     }
   }
 
   return {
     mapped: unmappedRequired.length === 0,
     unmappedRequired,
+    mappedFields,
     mappedCount: schema.required.length - unmappedRequired.length,
     totalRequired: schema.required.length,
   }
@@ -107,6 +114,127 @@ function ProgressRing({ pct, size=44 }) {
         strokeLinecap="round" transform={`rotate(-90 ${size/2} ${size/2})`}/>
       <text x={size/2} y={size/2+4} textAnchor="middle" fill={color} fontSize="9" fontWeight="700">{pct}%</text>
     </svg>
+  )
+}
+
+function TransformationShowcase({ resourceKey, record, results }) {
+  const [viewType, setViewType] = useState('success') // 'success' | 'error'
+
+  if (!resourceKey || !record) return (
+    <div className="transformation-showcase transformation-showcase--empty">
+      <div className="transformation-showcase__placeholder">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <path d="M4 17l6-6-6-6M12 19h8"/>
+        </svg>
+        <p>Select a resource category to view live FHIR R4 transformation logic</p>
+      </div>
+    </div>
+  )
+
+  // Determine which record to show
+  let displayRecord = record
+  if (viewType === 'error' && results?.failedRecords?.length > 0) {
+    // Find a record that actually failed (from dataset)
+    const failedIdx = results.failedRecords[0].idx - 1
+    // Note: this assumes dataset.resources[resourceKey] index matches
+    // In a real app we'd fetch by ID, but for POC this works
+  }
+
+  const { mappedFields, unmappedRequired } = mapRecord(displayRecord, resourceKey)
+  
+  // Format as FHIR R4 Structure
+  const fhirStructure = {
+    resourceType: resourceKey.charAt(0).toUpperCase() + resourceKey.slice(1).replace(/s$/, ''),
+    ...mappedFields,
+    meta: {
+      profile: [`http://hl7.org/fhir/us/core/StructureDefinition/us-core-${resourceKey.replace(/s$/, '')}`],
+      lastUpdated: new Date().toISOString()
+    }
+  }
+
+  const passedCount = results?.passed || 0
+  const failedCount = results?.failed || 0
+  const totalCount = results?.total || 0
+  const passRate = totalCount ? Math.round((passedCount/totalCount)*100) : 0
+
+  return (
+    <div className="transformation-showcase">
+      <div className="transformation-showcase__header">
+        <div className="transformation-showcase__title">
+          <span>Transformation Preview:</span>
+          <strong>{TAB_LABELS[resourceKey] || resourceKey}</strong>
+        </div>
+
+        {/* Resource Mapping Health */}
+        <div className="showcase-health">
+          <div className="showcase-health__labels">
+            <span className="health-label health-label--success">✓ {passedCount} Mapped</span>
+            <span className="health-label health-label--failed">✗ {failedCount} Failed</span>
+          </div>
+          <div className="showcase-health__bar">
+            <div className="showcase-health__fill" style={{ width: `${passRate}%` }} />
+          </div>
+        </div>
+
+        <div className="transformation-showcase__endpoint">
+          Target: <code>{DRCHRONO_ENDPOINTS[resourceKey]}</code>
+        </div>
+      </div>
+
+      {/* Toggle between success and error samples if failures exist */}
+      {failedCount > 0 && (
+        <div className="showcase-toggle">
+          <button className={`showcase-toggle__btn ${viewType === 'success' ? 'active' : ''}`}
+            onClick={() => setViewType('success')}>Success Sample</button>
+          <button className={`showcase-toggle__btn ${viewType === 'error' ? 'active' : ''}`}
+            onClick={() => setViewType('error')}>Error Sample</button>
+        </div>
+      )}
+
+      <div className="transformation-showcase__scroll">
+        {/* Source Row */}
+        <div className="showcase-section">
+          <div className="showcase-section__label">Input (CSV Row)</div>
+          <div className="showcase-csv">
+            {Object.entries(displayRecord).map(([k,v]) => (
+              <div key={k} className="showcase-csv__cell">
+                <span className="showcase-csv__k">{k}</span>
+                <span className="showcase-csv__v">{v || 'null'}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Mapping Logic */}
+        <div className="showcase-section">
+          <div className="showcase-section__label">Mapping Logic (Applied Rules)</div>
+          <div className="showcase-rules">
+            {Object.entries(mappedFields).map(([k,v]) => (
+              <div key={k} className="showcase-rule">
+                <span className="showcase-rule__target">{k}</span>
+                <span className="showcase-rule__arrow">→</span>
+                <span className="showcase-rule__src">{v}</span>
+              </div>
+            ))}
+            {unmappedRequired.map(e => (
+              <div key={e.field} className="showcase-rule showcase-rule--err">
+                <span className="showcase-rule__target">{e.field}</span>
+                <span className="showcase-rule__arrow">✗</span>
+                <span className="showcase-rule__src">Required field missing</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* FHIR Output */}
+        <div className="showcase-section">
+          <div className="showcase-section__label">Output (FHIR R4 JSON)</div>
+          <div className="showcase-json">
+            <pre>{JSON.stringify(fhirStructure, null, 2)}</pre>
+          </div>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -246,91 +374,98 @@ export default function Mapping({ onComplete }) {
         </div>
       )}
 
-      {/* Results per resource */}
+      {/* Results / Showcase split */}
       {Object.entries(results).length > 0 && (
-        <div className="mapping-results">
-          {/* Summary bar */}
-          {done && (
-            <div className="mapping-summary-bar">
-              <div className="mapping-summary-bar__item">
-                <span className="mapping-summary-bar__num" style={{color:'#16a34a'}}>{totalPassed.toLocaleString()}</span>
-                <span className="mapping-summary-bar__label">Records Mapped</span>
+        <div className="mapping-split">
+          <div className="mapping-results">
+            {/* Summary bar */}
+            {done && (
+              <div className="mapping-summary-bar">
+                <div className="mapping-summary-bar__item">
+                  <span className="mapping-summary-bar__num" style={{color:'#16a34a'}}>{totalPassed.toLocaleString()}</span>
+                  <span className="mapping-summary-bar__label">Records Mapped</span>
+                </div>
+                <div className="mapping-summary-bar__divider"/>
+                <div className="mapping-summary-bar__item">
+                  <span className="mapping-summary-bar__num" style={{color:'#dc2626'}}>{totalFailed.toLocaleString()}</span>
+                  <span className="mapping-summary-bar__label">Need Attention</span>
+                </div>
+                <div className="mapping-summary-bar__divider"/>
+                <div className="mapping-summary-bar__item">
+                  <span className="mapping-summary-bar__num" style={{color:'var(--primary)'}}>
+                    {totalRecords ? Math.round(totalPassed/totalRecords*100) : 0}%
+                  </span>
+                  <span className="mapping-summary-bar__label">Overall Rate</span>
+                </div>
               </div>
-              <div className="mapping-summary-bar__divider"/>
-              <div className="mapping-summary-bar__item">
-                <span className="mapping-summary-bar__num" style={{color:'#dc2626'}}>{totalFailed.toLocaleString()}</span>
-                <span className="mapping-summary-bar__label">Need Attention</span>
-              </div>
-              <div className="mapping-summary-bar__divider"/>
-              <div className="mapping-summary-bar__item">
-                <span className="mapping-summary-bar__num" style={{color:'var(--primary)'}}>
-                  {totalRecords ? Math.round(totalPassed/totalRecords*100) : 0}%
-                </span>
-                <span className="mapping-summary-bar__label">Overall Rate</span>
-              </div>
-            </div>
-          )}
-
-          {/* Per-resource cards */}
-          <div className="mapping-resource-list">
-            {Object.entries(results).map(([key, r]) => {
-              const rate = r.total ? Math.round(r.passed/r.total*100) : 0
-              const isExp = expanded[key]
-              const barColor = rate>=90?'#16a34a':rate>=60?'#d97706':'#dc2626'
-              return (
-                <div key={key} className="mapping-resource-card">
-                  <div className="mapping-resource-card__header" onClick={() => r.failed>0 && toggle(key)}>
-                    <ProgressRing pct={rate}/>
-                    <div className="mapping-resource-card__info">
-                      <div className="mapping-resource-card__name">{TAB_LABELS[key]||key}</div>
-                      <code className="mapping-resource-card__endpoint">{r.endpoint}</code>
-                    </div>
-                    <div className="mapping-resource-card__stats">
-                      <span style={{color:'#16a34a',fontSize:'0.78rem',fontWeight:600}}>✓ {r.passed.toLocaleString()} mapped</span>
-                      {r.failed > 0 && <span style={{color:'#dc2626',fontSize:'0.78rem',fontWeight:600,marginLeft:10}}>✗ {r.failed.toLocaleString()} failed</span>}
-                      <div style={{height:4,background:'#E5E7EB',borderRadius:2,overflow:'hidden',marginTop:4,width:120}}>
-                        <div style={{height:'100%',background:barColor,width:`${rate}%`}}/>
+            )}
+  
+            {/* Per-resource cards */}
+            <div className="mapping-resource-list">
+              {Object.entries(results).map(([key, r]) => {
+                const rate = r.total ? Math.round(r.passed/r.total*100) : 0
+                const isExp = expanded[key]
+                const isActive = currentKey === key
+                const barColor = rate>=90?'#16a34a':rate>=60?'#d97706':'#dc2626'
+                return (
+                  <div key={key} 
+                    className={`mapping-resource-card ${isActive ? 'mapping-resource-card--active' : ''}`}
+                    onClick={() => setCurrentKey(key)}>
+                    <div className="mapping-resource-card__header">
+                      <ProgressRing pct={rate}/>
+                      <div className="mapping-resource-card__info">
+                        <div className="mapping-resource-card__name">{TAB_LABELS[key]||key}</div>
+                        <code className="mapping-resource-card__endpoint">{r.endpoint}</code>
+                      </div>
+                      <div className="mapping-resource-card__stats">
+                        <span style={{color:'#16a34a',fontSize:'0.78rem',fontWeight:600}}>✓ {r.passed.toLocaleString()} mapped</span>
+                        {r.failed > 0 && <span style={{color:'#dc2626',fontSize:'0.78rem',fontWeight:600,marginLeft:10}}>✗ {r.failed.toLocaleString()} failed</span>}
+                        <div style={{height:4,background:'#E5E7EB',borderRadius:2,overflow:'hidden',marginTop:4,width:120}}>
+                          <div style={{height:'100%',background:barColor,width:`${rate}%`}}/>
+                        </div>
+                      </div>
+                      <div style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:8}}>
+                        {r.failed > 0 && <span style={{fontSize:'0.72rem',color:'var(--primary)',cursor:'pointer'}} 
+                          onClick={(e) => { e.stopPropagation(); toggle(key); }}>{isExp?'▴':'▾'} {r.failed} errors</span>}
                       </div>
                     </div>
-                    <div style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:8}}>
-                      {rate===100 && <span style={{fontSize:'0.72rem',color:'#16a34a',fontWeight:600}}>✓ Ready</span>}
-                      {r.failed > 0 && <span style={{fontSize:'0.72rem',color:'var(--primary)',cursor:'pointer'}}>{isExp?'▴':'▾'} {r.failed} errors</span>}
-                    </div>
+  
+                    {/* Expandable error details */}
+                    {isExp && r.failedRecords.length > 0 && (
+                      <div className="mapping-resource-card__errors">
+                        <table className="vld-debug-table" style={{marginTop:0}}>
+                          <thead>
+                            <tr><th>#</th><th>RECORD ID</th><th>MISSING FIELD</th><th>REASON</th></tr>
+                          </thead>
+                          <tbody>
+                            {r.failedRecords.map((fr, i) =>
+                              fr.errors.map((e, j) => (
+                                <tr key={`${i}-${j}`}>
+                                  {j===0 && <td rowSpan={fr.errors.length} style={{verticalAlign:'top'}}>{fr.idx}</td>}
+                                  {j===0 && <td rowSpan={fr.errors.length} className="vld-record-id" style={{verticalAlign:'top'}}>{fr.id}</td>}
+                                  <td><code style={{fontSize:'0.7rem',background:'#F1F5F9',padding:'1px 5px',borderRadius:3}}>{e.field}</code></td>
+                                  <td><span className={`err-tag ${e.reason==='null_value'?'err-tag--null':'err-tag--date'}`}>
+                                    {e.reason==='null_value'?'Null value':'Field missing'}
+                                  </span></td>
+                                </tr>
+                              ))
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
                   </div>
-
-                  {/* Expandable error details */}
-                  {isExp && r.failedRecords.length > 0 && (
-                    <div className="mapping-resource-card__errors">
-                      <table className="vld-debug-table" style={{marginTop:0}}>
-                        <thead>
-                          <tr><th>#</th><th>RECORD ID</th><th>MISSING FIELD</th><th>REASON</th></tr>
-                        </thead>
-                        <tbody>
-                          {r.failedRecords.map((fr, i) =>
-                            fr.errors.map((e, j) => (
-                              <tr key={`${i}-${j}`}>
-                                {j===0 && <td rowSpan={fr.errors.length} style={{verticalAlign:'top'}}>{fr.idx}</td>}
-                                {j===0 && <td rowSpan={fr.errors.length} className="vld-record-id" style={{verticalAlign:'top'}}>{fr.id}</td>}
-                                <td><code style={{fontSize:'0.7rem',background:'#F1F5F9',padding:'1px 5px',borderRadius:3}}>{e.field}</code></td>
-                                <td><span className={`err-tag ${e.reason==='null_value'?'err-tag--null':'err-tag--date'}`}>
-                                  {e.reason==='null_value'?'Null value':'Field missing'}
-                                </span></td>
-                              </tr>
-                            ))
-                          )}
-                        </tbody>
-                      </table>
-                      {r.failed > 50 && (
-                        <div style={{padding:'6px 14px',fontSize:'0.7rem',color:'var(--text-muted)'}}>
-                          Showing 50 of {r.failed} failed records
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )
-            })}
+                )
+              })}
+            </div>
           </div>
+
+          {/* RIGHT SIDE: Transformation Showcase */}
+          <TransformationShowcase 
+            resourceKey={currentKey} 
+            record={currentKey ? (dataset.resources[currentKey]?.[0] || {}) : null} 
+            results={results[currentKey]}
+          />
         </div>
       )}
     </div>

@@ -1,0 +1,28 @@
+# ============================================
+# MediSync — Production Overrides
+# ============================================
+# Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build -d
+#
+# Changes from dev:
+#   - Backend: no --reload, 2 workers
+#   - Frontend: Nginx serving built assets on port 80
+#   - No volume mounts (uses baked-in code)
+# ============================================
+
+services:
+
+  backend:
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
+    volumes: []
+    restart: always
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: production
+    ports:
+      - "80:80"
+    command: []
+    volumes: []
+    restart: always

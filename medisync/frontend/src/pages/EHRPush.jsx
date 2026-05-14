@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { useDataset } from '../context/DatasetContext'
 import { useApiRate } from '../context/ApiRateContext'
+import { ApiPrePushBot, ApiPostPushBot } from '../components/ApiMonitorBot'
 
 const TAB_LABELS = {
   medications:'Medications', medication:'Medications', conditions:'Conditions', condition:'Conditions',
@@ -221,6 +222,13 @@ export default function EHRPush() {
         </div>
       )}
 
+      {/* AI Pre-Push Analysis */}
+      <ApiPrePushBot
+        validationDetails={vd}
+        selected={selected}
+        resources={resources}
+      />
+
       {/* Real-time Push Log */}
       {(pushLog.length > 0 || pushing) && (
         <div className="push-log-section">
@@ -275,6 +283,9 @@ export default function EHRPush() {
           )}
         </div>
       )}
+
+      {/* AI Post-Push Failure Analysis */}
+      <ApiPostPushBot pushLog={pushLog} pushSummary={pushSummary} />
 
       {/* Bottom Bar */}
       <div className="push-select-bar">

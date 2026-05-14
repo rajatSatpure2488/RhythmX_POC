@@ -1,21 +1,22 @@
 """
 mapping.py — /mapping router
 Runs rule-based field mapping from parsed resources to DrChrono API fields.
+Fully dynamic: works with any resource keys present in the session.
 """
 from fastapi import APIRouter, HTTPException
-from app.routes.upload import _SESSION, RESOURCE_KEYS
+from app.routes.upload import _SESSION
 
 router = APIRouter()
 
-# ── Simple field-level mapping rules ─────────────────────────────
+# Known field maps for common resource types — pass-through for unknown ones
 FIELD_MAPS = {
     "patient": {
-        "first_name":  ["given", "first_name", "name"],
-        "last_name":   ["family", "last_name", "surname"],
+        "first_name":    ["given", "first_name", "name"],
+        "last_name":     ["family", "last_name", "surname"],
         "date_of_birth": ["birthDate", "dob", "date_of_birth"],
-        "gender":      ["gender", "sex"],
-        "email":       ["email"],
-        "phone":       ["phone", "telecom"],
+        "gender":        ["gender", "sex"],
+        "email":         ["email"],
+        "phone":         ["phone", "telecom"],
     },
     "encounters": {
         "appointment_date": ["date", "period", "appointment_date"],
@@ -28,29 +29,29 @@ FIELD_MAPS = {
         "onset_date":  ["onsetDateTime", "onset_date"],
     },
     "medications": {
-        "drug_name":   ["medicationCodeableConcept", "drug_name", "name"],
-        "dosage":      ["dosageInstruction", "dosage", "dose"],
-        "start_date":  ["authoredOn", "start_date"],
+        "drug_name":  ["medicationCodeableConcept", "drug_name", "name"],
+        "dosage":     ["dosageInstruction", "dosage", "dose"],
+        "start_date": ["authoredOn", "start_date"],
     },
     "observations": {
-        "loinc_code":  ["code", "loinc_code"],
-        "value":       ["valueQuantity", "value", "result"],
-        "date":        ["effectiveDateTime", "date"],
+        "loinc_code": ["code", "loinc_code"],
+        "value":      ["valueQuantity", "value", "result"],
+        "date":       ["effectiveDateTime", "date"],
     },
     "allergies": {
-        "allergen":    ["code", "substance", "allergen"],
-        "reaction":    ["reaction", "manifestation"],
-        "severity":    ["severity", "criticality"],
+        "allergen": ["code", "substance", "allergen"],
+        "reaction": ["reaction", "manifestation"],
+        "severity": ["severity", "criticality"],
     },
     "immunizations": {
-        "vaccine":     ["vaccineCode", "vaccine_name"],
-        "date":        ["occurrenceDateTime", "date"],
-        "status":      ["status"],
+        "vaccine": ["vaccineCode", "vaccine_name"],
+        "date":    ["occurrenceDateTime", "date"],
+        "status":  ["status"],
     },
     "clinical_notes": {
-        "note_text":   ["text", "content", "note", "soap_note"],
-        "date":        ["date", "created"],
-        "type":        ["type", "category"],
+        "note_text": ["text", "content", "note", "soap_note"],
+        "date":      ["date", "created"],
+        "type":      ["type", "category"],
     },
 }
 
@@ -71,25 +72,26 @@ def _map_record(record: dict, field_map: dict) -> dict:
 
 @router.post("/run")
 async def run_mapping():
-    """Map all loaded resources to DrChrono field names."""
+    """Map all loaded resources to DrChrono field names. Works with any resource types."""
     if not _SESSION.get("resources"):
         raise HTTPException(status_code=400, detail="No dataset loaded. Run /upload/load first.")
 
-    resources = _SESSION["resources"]
-    results   = {}
+    resources    = _SESSION["resources"]
+    results      = {}
     total_mapped = 0
 
-    for key in RESOURCE_KEYS:
-        records = resources.get(key, [])
+    # Iterate over whatever keys are actually in the session — fully dynamic
+    for key, records in resources.items():
         if not records:
             results[key] = {"mapped": 0, "success": True, "sample": None}
             continue
 
-        field_map  = FIELD_MAPS.get(key, {})
+        field_map = FIELD_MAPS.get(key, {})
         if field_map:
             mapped_records = [_map_record(r, field_map) for r in records]
         else:
-            mapped_records = records  # pass-through for unmapped resources
+            # Pass-through for resource types not in FIELD_MAPS
+            mapped_records = records
 
         _SESSION.setdefault("mapped", {})[key] = mapped_records
         total_mapped += len(mapped_records)

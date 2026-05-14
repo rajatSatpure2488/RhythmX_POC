@@ -3,7 +3,15 @@ import { getAuthStatus, initiateOAuthFlow, setManualTokenAPI, exchangeCode } fro
 
 const AuthContext = createContext(null)
 
-const STORAGE_KEY = 'medisync_auth'
+/**
+ * Auth persistence strategy:
+ *  - sessionStorage only — cleared automatically when the browser tab/window closes
+ *    or the dev server restarts (new tab).
+ *  - This ensures the login page ALWAYS appears on a fresh start.
+ *  - OAuth callback codes are still handled (they come back via URL params in the
+ *    same tab, so sessionStorage survives the redirect).
+ */
+const SESSION_KEY = 'medisync_auth_session'
 
 const INITIAL = {
   connected: false, accessToken: null, refreshToken: null,
@@ -11,61 +19,65 @@ const INITIAL = {
   expiresIn: null, lastHandshake: null, status: 'idle', error: null, devMode: false,
 }
 
-/** Persist only safe fields — never store raw tokens in localStorage in production */
-function saveToStorage(auth) {
+function saveSession(auth) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify({
       connected:    auth.connected,
       doctorId:     auth.doctorId,
       doctorName:   auth.doctorName,
       targetSystem: auth.targetSystem,
       devMode:      auth.devMode ?? false,
-      status:       auth.connected || auth.devMode ? auth.status : 'idle',
+      status:       auth.status,
     }))
-  } catch { /* quota exceeded — ignore */ }
+  } catch { /* quota exceeded */ }
 }
 
-function loadFromStorage() {
+function loadSession() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    const raw = sessionStorage.getItem(SESSION_KEY)
     if (!raw) return null
     const saved = JSON.parse(raw)
-    // Only restore if still connected or in dev mode
+    // Only restore within the same tab session (OAuth redirect keeps session alive)
     if (saved.connected || saved.devMode) return saved
   } catch { /* corrupted */ }
   return null
 }
 
+/** Also clear any old localStorage key from the previous implementation */
+function clearLegacyStorage() {
+  try { localStorage.removeItem('medisync_auth') } catch { /* ignore */ }
+}
+
 export function AuthProvider({ children }) {
   const [auth, setAuthState] = useState(() => {
-    const saved = loadFromStorage()
+    clearLegacyStorage()         // remove stale localStorage on every boot
+    const saved = loadSession()  // only restore if same-tab OAuth redirect
     return saved ? { ...INITIAL, ...saved } : INITIAL
   })
 
-  // Wrap setState to always persist
   const setAuth = useCallback((updater) => {
     setAuthState(prev => {
       const next = typeof updater === 'function' ? updater(prev) : updater
-      saveToStorage(next)
+      saveSession(next)
       return next
     })
   }, [])
 
-  // Poll /auth/status every 60s (skip in dev mode)
+  // ── Poll /auth/status every 60 s (skip in dev mode) ──────────
   const syncStatus = useCallback(async () => {
     if (auth.devMode) return
     try {
       const data = await getAuthStatus()
       setAuth(prev => ({
         ...prev,
-        connected:    data.connected,
-        doctorId:     data.doctor_id,
-        doctorName:   data.doctor_name,
-        targetSystem: data.target_system || 'DrChrono EHR',
-        expiresIn:    data.expires_in,
-        lastHandshake:data.last_handshake,
-        status:       data.connected ? 'connected' : 'idle',
-        error:        null,
+        connected:     data.connected,
+        doctorId:      data.doctor_id,
+        doctorName:    data.doctor_name,
+        targetSystem:  data.target_system || 'DrChrono EHR',
+        expiresIn:     data.expires_in,
+        lastHandshake: data.last_handshake,
+        status:        data.connected ? 'connected' : 'idle',
+        error:         null,
       }))
     } catch {
       // Backend unreachable — keep existing state silently
@@ -80,7 +92,7 @@ export function AuthProvider({ children }) {
     }
   }, [syncStatus, auth.devMode])
 
-  // OAuth Callback handler
+  // ── OAuth Callback handler (handles redirect back from DrChrono) ──
   useEffect(() => {
     const params     = new URLSearchParams(window.location.search)
     const code       = params.get('code')
@@ -107,6 +119,7 @@ export function AuthProvider({ children }) {
     }
   }, []) // eslint-disable-line
 
+  // ── Actions ───────────────────────────────────────────────────
   const initiateOAuth = async () => {
     setAuth(prev => ({ ...prev, status: 'connecting', error: null }))
     try {
@@ -131,7 +144,6 @@ export function AuthProvider({ children }) {
     }
   }
 
-  // ── Developer Mode — bypass OAuth for testing ──────────────
   const enterDevMode = () => {
     setAuth({
       connected: true, accessToken: 'DEV_MODE_TOKEN', refreshToken: null,
@@ -143,7 +155,9 @@ export function AuthProvider({ children }) {
   }
 
   const logout = () => {
-    localStorage.removeItem(STORAGE_KEY)
+    sessionStorage.removeItem(SESSION_KEY)
+    sessionStorage.removeItem('medisync_pipeline')  // reset pipeline to Step 1
+    try { localStorage.removeItem('medisync_auth') } catch { /* ignore */ }
     setAuthState({ ...INITIAL })
   }
 

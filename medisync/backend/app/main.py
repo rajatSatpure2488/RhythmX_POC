@@ -9,7 +9,28 @@ from app.core import config
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routes import auth, upload, mapping, dryrun, push
+from app.routes import auth, upload, mapping, dryrun, push, ai_explain
+
+# ── FHIR Pipeline (independent module — delete this block to remove) ──
+try:
+    from app.fhir_pipeline.router import router as pipeline_router
+    _PIPELINE_AVAILABLE = True
+except ImportError:
+    _PIPELINE_AVAILABLE = False
+
+# ── FHIR R5 Integration (independent module — delete this block to remove) ──
+try:
+    from app.fhir_r5.router import router as fhir_r5_router
+    _FHIR_R5_AVAILABLE = True
+except ImportError:
+    _FHIR_R5_AVAILABLE = False
+
+# ── Rule-Based Mapper (FHIR R5 → DrChrono — delete this block to remove) ──
+try:
+    from app.mappers.router import router as mapper_router
+    _MAPPER_AVAILABLE = True
+except ImportError:
+    _MAPPER_AVAILABLE = False
 
 app = FastAPI(
     title="MediSync API",
@@ -40,8 +61,20 @@ app.include_router(auth.router,    prefix="/auth",    tags=["Authentication"])
 app.include_router(upload.router,  prefix="/upload",  tags=["Upload"])
 app.include_router(mapping.router, prefix="/mapping", tags=["Mapping"])
 app.include_router(dryrun.router,  prefix="/dryrun",  tags=["DryRun"])
-app.include_router(push.router,    prefix="/push",    tags=["Push"])
+app.include_router(push.router,       prefix="/push",    tags=["Push"])
+app.include_router(ai_explain.router, prefix="/ai",      tags=["AI Assistant"])
 
+# ── FHIR Pipeline (independent — remove this line to disconnect) ──
+if _PIPELINE_AVAILABLE:
+    app.include_router(pipeline_router, prefix="/pipeline", tags=["FHIR Pipeline"])
+
+# ── FHIR R5 (independent — remove this line to disconnect) ──
+if _FHIR_R5_AVAILABLE:
+    app.include_router(fhir_r5_router, prefix="/fhir-r5", tags=["FHIR R5"])
+
+# ── Rule-Based Mapper (independent — remove this line to disconnect) ──
+if _MAPPER_AVAILABLE:
+    app.include_router(mapper_router, prefix="/mapper", tags=["Mapper"])
 
 @app.on_event("startup")
 async def startup_event():

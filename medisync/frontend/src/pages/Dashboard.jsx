@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext'
 import Sidebar from '../components/Layout/Sidebar'
 import Topbar from '../components/Layout/Topbar'
 import AuthGate from '../components/Sidebar/AuthGate'
+import AuthStage from '../components/Sidebar/AuthStage'
 import Ingestion from './Ingestion'
 import ReviewDataset from './ReviewDataset'
 import Mapping from './Mapping'
@@ -11,6 +12,7 @@ import EHRPush from './EHRPush'
 
 const STAGE_ORDER = ['auth', 'ingestion', 'review', 'mapping', 'validation', 'push']
 const STAGE_TITLES = {
+  auth:       'EHR Authentication',
   ingestion:  'Data Ingestion',
   review:     'Review Dataset',
   mapping:    'Field Mapping',
@@ -19,13 +21,20 @@ const STAGE_TITLES = {
 }
 
 const PIPELINE_KEY = 'medisync_pipeline'
+const AUTH_SESSION = 'medisync_auth_session'
 
 function loadPipeline() {
   try {
+    // If auth session is gone (fresh restart), clear pipeline too
+    const authRaw = sessionStorage.getItem(AUTH_SESSION)
+    if (!authRaw) {
+      sessionStorage.removeItem(PIPELINE_KEY)
+      return { activeStage: 'auth', completedStages: [] }
+    }
     const raw = sessionStorage.getItem(PIPELINE_KEY)
     if (raw) return JSON.parse(raw)
   } catch { /* ignore */ }
-  return { activeStage: 'ingestion', completedStages: ['auth'] }
+  return { activeStage: 'auth', completedStages: [] }
 }
 
 function savePipeline(activeStage, completedStages) {
@@ -100,6 +109,7 @@ export default function Dashboard() {
         <Topbar title={STAGE_TITLES[activeStage] ?? 'MediSync'} />
 
         <main className="main-content">
+          {activeStage === 'auth'       && <AuthStage     onComplete={() => advanceStage('auth')} />}
           {activeStage === 'ingestion'  && <Ingestion     onComplete={() => advanceStage('ingestion')} />}
           {activeStage === 'review'     && <ReviewDataset  onComplete={() => advanceStage('review')} />}
           {activeStage === 'mapping'    && <Mapping        onComplete={() => advanceStage('mapping')} />}

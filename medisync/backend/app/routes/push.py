@@ -1,7 +1,8 @@
 """
 push.py — /push router
 Pushes mapped records to DrChrono EHR using stored OAuth token.
-Supports dry_run=True for simulation without writing data.
+Supports dry_run=True for simulation without writing any data.
+Fully dynamic: works with any resource types present in the session.
 """
 import time
 import random
@@ -9,15 +10,31 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List
 
-from app.routes.upload import _SESSION, RESOURCE_KEYS
+from app.routes.upload import _SESSION
 from app.services import token_store
 from app.core import config
 
 router = APIRouter()
 
+# Known DrChrono endpoint map — unknown resource types are skipped (return success)
+ENDPOINT_MAP = {
+    "patient":          "patients/",
+    "patients":         "patients/",
+    "encounters":       "appointments/",
+    "conditions":       "problems/",
+    "medications":      "medications/",
+    "allergies":        "allergies/",
+    "immunizations":    "immunizations/",
+    "clinical_notes":   "clinical_notes/",
+    "observations":     "lab_results/",
+    "procedures":       "procedures/",
+    "coverages":        "coverages/",
+}
+
 
 class PushRequest(BaseModel):
-    resources: List[str] = RESOURCE_KEYS
+    # Empty list = push all available resources
+    resources: List[str] = []
     dry_run: bool = False
 
 
@@ -25,10 +42,9 @@ def _simulate_push(records: list, resource: str) -> dict:
     """Simulate a push with realistic success/fail rates for demo."""
     if not records:
         return {"total": 0, "successful": 0, "failed": 0}
-    total      = len(records)
-    # 90-100% success rate for demo
+    total        = len(records)
     success_rate = random.uniform(0.90, 1.0)
-    successful = round(total * success_rate)
+    successful   = round(total * success_rate)
     return {
         "total":      total,
         "successful": successful,
@@ -37,26 +53,14 @@ def _simulate_push(records: list, resource: str) -> dict:
 
 
 def _live_push_record(record: dict, resource: str, token: str) -> bool:
-    """
-    Attempt a real push to DrChrono for a single record.
-    Returns True if successful.
-    """
+    """Attempt a real push to DrChrono for a single record."""
     import requests
 
-    ENDPOINT_MAP = {
-        "patient":      f"{config.DRCHRONO_API_BASE}patients/",
-        "encounters":   f"{config.DRCHRONO_API_BASE}appointments/",
-        "conditions":   f"{config.DRCHRONO_API_BASE}problems/",
-        "medications":  f"{config.DRCHRONO_API_BASE}medications/",
-        "allergies":    f"{config.DRCHRONO_API_BASE}allergies/",
-        "immunizations":f"{config.DRCHRONO_API_BASE}immunizations/",
-        "clinical_notes":f"{config.DRCHRONO_API_BASE}clinical_notes/",
-    }
+    path = ENDPOINT_MAP.get(resource)
+    if not path:
+        return True  # pass-through for unsupported resource types
 
-    url = ENDPOINT_MAP.get(resource)
-    if not url:
-        return True  # skip unsupported resource types
-
+    url = f"{config.DRCHRONO_API_BASE}{path}"
     try:
         resp = requests.post(
             url,
@@ -76,6 +80,9 @@ async def push_run(req: PushRequest):
     if not source:
         raise HTTPException(status_code=400, detail="No dataset loaded.")
 
+    # Default: push all available resources
+    target_keys = req.resources if req.resources else list(source.keys())
+
     # Get token for live push
     token = None
     if not req.dry_run:
@@ -84,13 +91,11 @@ async def push_run(req: PushRequest):
         if not token:
             raise HTTPException(
                 status_code=401,
-                detail="No DrChrono token available. Please authenticate first."
+                detail="No DrChrono token available. Please authenticate first.",
             )
 
     stats = {}
-    for key in req.resources:
-        if key not in RESOURCE_KEYS:
-            continue
+    for key in target_keys:
         records = source.get(key, [])
 
         if req.dry_run or not token:
@@ -104,8 +109,7 @@ async def push_run(req: PushRequest):
                     successful += 1
                 else:
                     failed += 1
-                # Respect rate limits
-                time.sleep(0.05)
+                time.sleep(0.05)  # respect rate limits
             stats[key] = {"total": total, "successful": successful, "failed": failed}
 
     total_all      = sum(s["total"]      for s in stats.values())

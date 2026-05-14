@@ -35,6 +35,13 @@ export default defineConfig({
         timeout: 120000,
         proxyTimeout: 120000,
       },
+      // FHIR Pipeline Lab (independent — remove to disconnect)
+      '/pipeline': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+        timeout: 60000,
+        proxyTimeout: 60000,
+      },
     },
   },
 })
