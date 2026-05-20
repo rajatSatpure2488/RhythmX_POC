@@ -14,7 +14,7 @@ export default function App() {
         <DatasetProvider>
           {/* View toggle — remove this block + PipelineTest import to clean up */}
           <div style={{
-            position: 'fixed', top: 12, right: 16, zIndex: 9999,
+            position: 'fixed', top: 64, right: 12, zIndex: 9999,
             display: 'flex', gap: 4, background: '#0f172a',
             padding: 4, borderRadius: 10, border: '1px solid #1e293b',
           }}>

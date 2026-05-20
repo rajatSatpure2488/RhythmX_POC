@@ -12,7 +12,21 @@ from app.core import config
 
 
 class DrChronoClient:
-    """Wraps all DrChrono REST API calls."""
+    """Wraps all DrChrono REST API calls.
+
+    Every outgoing request includes the ``X-DRC-API-Version`` header
+    (value from ``config.DRCHRONO_API_VERSION``, currently ``v4`` / Hunt Valley)
+    so responses always come back in the expected schema.
+    """
+
+    # ——— shared header factory ———
+    def _api_headers(self, access_token: str) -> Dict:
+        """Build standard headers for authenticated DrChrono API calls."""
+        return {
+            "Authorization":      f"Bearer {access_token}",
+            "Content-Type":       "application/json",
+            "X-DRC-API-Version":  config.DRCHRONO_API_VERSION,
+        }
 
     def get_authorization_url(self, scope: str) -> str:
         """Build the DrChrono OAuth authorization URL."""
@@ -79,13 +93,9 @@ class DrChronoClient:
 
     def get_current_user(self, access_token: str) -> Dict:
         """Fetch the currently authenticated user profile."""
-        headers = {
-            "Authorization": f"Bearer {access_token}",
-            "Content-Type":  "application/json",
-        }
         response = requests.get(
             f"{config.DRCHRONO_API_BASE}users/current",
-            headers=headers,
+            headers=self._api_headers(access_token),
             timeout=30,
         )
         if response.status_code != 200:
@@ -97,13 +107,9 @@ class DrChronoClient:
 
     def get_doctor_profile(self, access_token: str, user_id: str) -> Optional[Dict]:
         """Fetch the doctor profile linked to a user ID."""
-        headers = {
-            "Authorization": f"Bearer {access_token}",
-            "Content-Type":  "application/json",
-        }
         response = requests.get(
             f"{config.DRCHRONO_API_BASE}doctors",
-            headers=headers,
+            headers=self._api_headers(access_token),
             params={"user": user_id},
             timeout=30,
         )
@@ -120,14 +126,13 @@ class DrChronoClient:
         search: Optional[str] = None,
     ):
         """Fetch patient list from DrChrono."""
-        headers = {"Authorization": f"Bearer {access_token}"}
-        params  = {"limit": limit, "offset": offset}
+        params = {"limit": limit, "offset": offset}
         if search:
             params["search"] = search
 
         response = requests.get(
             f"{config.DRCHRONO_API_BASE}patients",
-            headers=headers,
+            headers=self._api_headers(access_token),
             params=params,
             timeout=30,
         )
@@ -136,10 +141,9 @@ class DrChronoClient:
 
     def get_patient_by_id(self, access_token: str, patient_id: str) -> Dict:
         """Get a single patient by ID."""
-        headers = {"Authorization": f"Bearer {access_token}"}
         response = requests.get(
             f"{config.DRCHRONO_API_BASE}patients/{patient_id}",
-            headers=headers,
+            headers=self._api_headers(access_token),
             timeout=30,
         )
         response.raise_for_status()

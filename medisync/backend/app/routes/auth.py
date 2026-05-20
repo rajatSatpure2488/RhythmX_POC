@@ -99,7 +99,14 @@ def oauth_exchange(req: ExchangeRequest):
     except Exception:
         pass  # Auth still succeeds even if profile fetch fails
 
-    # 3. Store tokens
+    # 3. Clear prerequisite cache from previous session
+    try:
+        from app.services.prerequisite_resolver import clear_cache
+        clear_cache()
+    except ImportError:
+        pass
+
+    # 4. Store tokens
     token_store.set_token(
         access_token=access_token,
         expires_in=expires_in,
@@ -137,6 +144,13 @@ def manual_token(req: ManualTokenRequest):
         if e.status_code == 401:
             raise HTTPException(status_code=401, detail="Invalid or expired access token")
 
+    # Clear prerequisite cache from previous session
+    try:
+        from app.services.prerequisite_resolver import clear_cache
+        clear_cache()
+    except ImportError:
+        pass
+
     token_store.set_token(
         access_token=req.access_token,
         expires_in=172800,
@@ -169,6 +183,22 @@ def auth_status():
         expires_in=token_store.seconds_until_expiry(),
         last_handshake=_handshake_str(),
     )
+
+
+# ── GET /auth/token (DEBUG/TESTING) ──────────────────────
+@router.get("/token")
+def auth_token():
+    """Return the raw access token for testing in external tools."""
+    if not token_store.is_valid():
+        raise HTTPException(status_code=401, detail="No active token found in memory. Please authenticate via the UI first.")
+    
+    token = token_store.get_token()
+    return {
+        "access_token": token.access_token,
+        "doctor_id": token.doctor_id,
+        "expires_in_seconds": token_store.seconds_until_expiry()
+    }
+
 
 
 # ── POST /auth/refresh ───────────────────────────────────

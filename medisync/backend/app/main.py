@@ -9,7 +9,7 @@ from app.core import config
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routes import auth, upload, mapping, dryrun, push, ai_explain
+from app.routes import auth, upload, mapping, dryrun, push, ai_explain, drchrono, fhir_proxy
 
 # ── FHIR Pipeline (independent module — delete this block to remove) ──
 try:
@@ -50,6 +50,8 @@ app.add_middleware(
         "http://127.0.0.1:8502",
         "http://localhost:8503",
         "http://127.0.0.1:8503",
+        "http://localhost:8888",
+        "http://127.0.0.1:8888",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -63,6 +65,8 @@ app.include_router(mapping.router, prefix="/mapping", tags=["Mapping"])
 app.include_router(dryrun.router,  prefix="/dryrun",  tags=["DryRun"])
 app.include_router(push.router,       prefix="/push",    tags=["Push"])
 app.include_router(ai_explain.router, prefix="/ai",      tags=["AI Assistant"])
+app.include_router(drchrono.router,   prefix="/drchrono", tags=["DrChrono Resources"])
+app.include_router(fhir_proxy.router, prefix="/fhir-proxy", tags=["FHIR Proxy"])
 
 # ── FHIR Pipeline (independent — remove this line to disconnect) ──
 if _PIPELINE_AVAILABLE:

@@ -7,43 +7,65 @@ import AiAssistantBot from '../components/AiAssistantBot'
 const BACKEND = 'http://localhost:8000'
 
 const TAB_LABELS = {
-  medications:'Medications', conditions:'Conditions', encounters:'Encounters',
-  observations:'Observations', allergies:'Allergies', immunizations:'Immunizations',
-  procedures:'Procedures', patient:'Patient', patients:'Patient',
-  vitals:'Vitals', coverages:'Coverages', appointments:'Appointments',
-  clinical_notes:'Clinical Notes', diagnostic_reports:'Diagnostic Reports',
-  observation_notes:'Observation Notes', service_requests:'Service Requests',
+  medications:'Medications', medication:'Medications',
+  conditions:'Conditions', condition:'Conditions',
+  problems:'Conditions', problem:'Conditions', problem_list:'Conditions',
+  encounters:'Encounters', encounter:'Encounters',
+  observations:'Observations', observation:'Observations',
+  allergies:'Allergies', allergy:'Allergies',
+  immunizations:'Immunizations', immunization:'Immunizations',
+  procedures:'Procedures', procedure:'Procedures',
+  patient:'Patient', patients:'Patient',
+  documents:'Documents', document:'Documents',
+  document_reference:'Documents', document_references:'Documents',
+  clinical_notes:'Clinical Notes', clinical_note:'Clinical Notes',
+  vitals:'Vitals',
+  coverages:'Coverages', coverage:'Coverages',
+  appointments:'Appointments',
+  diagnostic_reports:'Diagnostic Reports',
+  observation_notes:'Observation Notes',
+  service_requests:'Service Requests',
 }
 
 const DRCHRONO_ENDPOINTS = {
-  patient:       { method:'POST', path:'/api/patients',                 note:'Creates patient in DrChrono' },
-  medications:   { method:'POST', path:'/api/medications',              note:'Attached to patient by ID' },
-  conditions:    { method:'POST', path:'/api/conditions',               note:'Requires patient_id' },
-  encounters:    { method:'POST', path:'/api/appointments',             note:'Requires doctor_id + patient_id' },
-  observations:  { method:'POST', path:'/api/clinical_note_field_values', note:'Requires appointment_id' },
-  allergies:     { method:'POST', path:'/api/allergies',                note:'Requires patient_id' },
-  immunizations: { method:'POST', path:'/api/immunizations',            note:'Requires patient_id' },
-  procedures:    { method:'POST', path:'/api/procedures',               note:'Requires patient_id' },
-  coverages:     { method:'POST', path:'/api/coverages',                note:'Requires patient_id' },
-  clinical_notes:{ method:'PATCH', path:'/api/clinical_notes/{id}',     note:'GET first, then PATCH' },
-  appointments:  { method:'POST', path:'/api/appointments',             note:'Requires doctor_id' },
-  diagnostic_reports:{ method:'POST', path:'/api/documents',           note:'Binary upload supported' },
-  observation_notes: { method:'POST', path:'/api/clinical_note_field_values', note:'Linked to appointment' },
+  patient:              { method:'POST',  path:'/api/patients',                     note:'Creates patient in DrChrono' },
+  patients:             { method:'POST',  path:'/api/patients',                     note:'Creates patient in DrChrono' },
+  medications:          { method:'POST',  path:'/api/medications',                  note:'Attached to patient by ID' },
+  conditions:           { method:'POST',  path:'/api/problems',                     note:'Requires patient_id' },
+  problems:             { method:'POST',  path:'/api/problems',                     note:'Requires patient_id' },
+  encounters:           { method:'POST',  path:'/api/appointments',                 note:'Requires doctor_id + patient_id' },
+  observations:         { method:'POST',  path:'/api/clinical_note_field_values',    note:'Requires appointment_id' },
+  allergies:            { method:'POST',  path:'/api/allergies',                    note:'Requires patient_id' },
+  immunizations:        { method:'POST',  path:'/api/patient_vaccine_records',      note:'Requires patient_id' },
+  procedures:           { method:'POST',  path:'/api/procedures',                  note:'Requires patient_id' },
+  documents:            { method:'POST',  path:'/api/documents',                   note:'Multipart file upload (PDF, JPG, etc.)' },
+  document_reference:   { method:'POST',  path:'/api/documents',                   note:'Multipart file upload from FHIR DocumentReference' },
+  document_references:  { method:'POST',  path:'/api/documents',                   note:'Multipart file upload from FHIR DocumentReference' },
+  clinical_notes:       { method:'POST',  path:'/api/clinical_notes',              note:'Clinical note text fields' },
+  coverages:            { method:'POST',  path:'/api/patient_insurances',           note:'Requires patient_id' },
+  appointments:         { method:'POST',  path:'/api/appointments',                 note:'Requires doctor_id' },
+  diagnostic_reports:   { method:'POST',  path:'/api/documents',                   note:'Binary upload supported' },
+  observation_notes:    { method:'POST',  path:'/api/clinical_note_field_values',    note:'Linked to appointment' },
 }
 
 const REQUIRED = {
-  medications:   ['name','dosage','status'],
-  conditions:    ['code','status','patient_id'],
-  encounters:    ['type','date','patient_id'],
-  observations:  ['code','value','effective_date','patient_id'],
-  allergies:     ['substance','status','patient_id'],
-  immunizations: ['vaccine_code','date','patient_id'],
-  procedures:    ['code','performed_date','patient_id'],
-  patient:       ['name','birth_date','gender'],
-  coverages:     ['payer','status','patient_id'],
-  appointments:  ['date','doctor_id'],
-  clinical_notes:['note_text'],
-  observation_notes:['observation_code','value'],
+  medications:          ['name','dosage','status'],
+  conditions:           ['code','status','patient_id'],
+  problems:             ['code','status','patient_id'],
+  encounters:           ['type','date','patient_id'],
+  observations:         ['code','value','effective_date','patient_id'],
+  allergies:            ['substance','status','patient_id'],
+  immunizations:        ['vaccine_code','date','patient_id'],
+  procedures:           ['code','performed_date','patient_id'],
+  patient:              ['name','birth_date','gender'],
+  patients:             ['name','birth_date','gender'],
+  documents:            ['patient','description','document'],
+  document_reference:   ['patient','description','document'],
+  document_references:  ['patient','description','document'],
+  clinical_notes:       ['notes','patient_id'],
+  coverages:            ['payer','status','patient_id'],
+  appointments:         ['date','doctor_id'],
+  observation_notes:    ['observation_code','value'],
 }
 
 // Troubleshooting guide per error type + resource
@@ -53,6 +75,8 @@ const TROUBLESHOOT = {
     medications:`1. Check 'name', 'dosage', 'status' columns exist in medications CSV.\n2. Null values will be rejected by DrChrono API.\n3. Add default values (e.g. status='active') before re-ingesting.`,
     conditions: `1. Ensure 'code', 'status', 'patient_id' are populated per row.\n2. DrChrono rejects conditions without a valid patient_id.\n3. Run Patient stage first to generate patient IDs.`,
     encounters: `1. 'type', 'date', 'patient_id' are required.\n2. Dates must be in YYYY-MM-DD format.\n3. patient_id must match a created patient in DrChrono.`,
+    documents:  `1. Each document row must have 'patient' (patient_id), 'description', and 'document' (base64 or file path).\n2. DrChrono /api/documents uses multipart upload — the file content is required.\n3. Supported file types: PDF, JPEG, PNG, TIFF.\n4. If using FHIR DocumentReference, ensure content[0].attachment.data has the base64 content.`,
+    document_reference: `1. FHIR DocumentReference must have content[0].attachment.data (base64 encoded).\n2. Also needs subject.reference or _drchrono_patient_id.\n3. The attachment.contentType determines the upload MIME type.`,
     default:    `1. Fill all required fields in the source CSV.\n2. Check column names match expected FHIR field names.\n3. Re-upload the corrected file in Stage 2 (Ingestion).`,
   },
   date_format: {
@@ -71,31 +95,87 @@ function getTroubleshootText(errorType, resourceKey) {
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}/
 const SHORT_DATE = /^\d{2}[\/\-]\d{2}[\/\-]\d{2,4}$/
 
+// Alias map: required field tokens that map to multiple source key tokens
+const FIELD_ALIASES = {
+  'birthdate':    ['birthdate', 'dateofbirth', 'dob', 'birthdt'],
+  'vaccinecode':  ['vaccinecode', 'cvxcode', 'cvx', 'vaccinename'],
+  'patientid':    ['patientid', 'patient', 'memberid'],
+  'patient':      ['patient', 'patientid', 'memberid'],
+  'document':     ['document', 'filepath', 'filename', 'localpath', 'documentpath', 'filecontent', 'data', 'attachmentdata'],
+  'description':  ['description', 'name', 'namefull', 'title', 'label'],
+}
+
+// Normalize a field key: lowercase, remove underscores/spaces/hyphens AND camelCase humps
+function normalizeKey(s) {
+  return s
+    .replace(/([a-z])([A-Z])/g, '$1$2')
+    .toLowerCase()
+    .replace(/[_\s\-]/g, '')
+}
+
+// Unwrap FHIR complex types (HumanName arrays, CodeableConcept, etc.) to a display string
+function resolveValue(val) {
+  if (val === null || val === undefined) return undefined
+  if (Array.isArray(val)) {
+    if (val.length === 0) return undefined
+    const first = val[0]
+    if (typeof first === 'object' && first !== null) {
+      if (first.family || first.text) {
+        const given = Array.isArray(first.given) ? first.given.join(' ') : ''
+        return `${given} ${first.family || first.text || ''}`.trim()
+      }
+      if (first.text)    return first.text
+      if (first.display) return first.display
+    }
+    return String(first)
+  }
+  return val
+}
+
+
 function auditRecord(rec, resourceKey) {
   const errors = []
   const reqFields = REQUIRED[resourceKey] || []
   const allFields = Object.keys(rec)
+
   for (const rf of reqFields) {
-    const matchKey = allFields.find(f => f.toLowerCase().replace(/[_\s]/g,'').includes(rf.replace(/[_\s]/g,'')))
-    const val = matchKey ? rec[matchKey] : undefined
+    const rfNorm = normalizeKey(rf)
+    const aliases = FIELD_ALIASES[rfNorm] || [rfNorm]
+    // Find source key whose normalized form matches the schema field OR any alias
+    const matchKey = allFields.find(f => {
+      const fNorm = normalizeKey(f)
+      return fNorm === rfNorm || aliases.includes(fNorm)
+        || rfNorm.includes(fNorm) || fNorm.includes(rfNorm)
+    })
+    const rawVal = matchKey !== undefined ? rec[matchKey] : undefined
+    const val = resolveValue(rawVal)  // unwrap FHIR arrays
     if (val === null || val === undefined || val === '') {
-      errors.push({ field: matchKey||rf, type:'null_value', tag:'Null value', cls:'err-tag--null',
+      errors.push({ field: matchKey || rf, type:'null_value', tag:'Null value', cls:'err-tag--null',
         detail:`Required field '${rf}' is null or missing.` })
     }
   }
+
   for (const f of allFields) {
     const lower = f.toLowerCase()
-    if (lower.includes('date')||lower.endsWith('_on')||lower.endsWith('_at')) {
-      const val = String(rec[f]||'')
-      if (val.length > 3 && !ISO_DATE.test(val) && SHORT_DATE.test(val)) {
-        errors.push({ field: f, type:'date_format', tag:'Bad date', cls:'err-tag--date',
-          detail:`'${f}' must be YYYY-MM-DD. Got: '${val.slice(0,20)}'` })
+    if (lower.includes('date') || lower.endsWith('_on') || lower.endsWith('_at') || lower.endsWith('date')) {
+      const val = String(rec[f] || '')
+      if (val.length > 3) {
+        // ISO datetime (with T) is VALID — truncate mentally, do NOT flag
+        const isIsoDatetime = /^\d{4}-\d{2}-\d{2}T/.test(val)
+        const isIsoDate     = /^\d{4}-\d{2}-\d{2}$/.test(val)
+        const isShortDate   = SHORT_DATE.test(val)
+        // Only flag if it matches the bad short-date pattern AND is NOT already ISO
+        if (!isIsoDatetime && !isIsoDate && isShortDate) {
+          errors.push({ field: f, type:'date_format', tag:'Bad date', cls:'err-tag--date',
+            detail:`'${f}' must be YYYY-MM-DD. Got: '${val.slice(0,20)}'` })
+        }
       }
     }
   }
+
   for (const f of allFields) {
-    if (f.toLowerCase().includes('code')||f.toLowerCase().includes('icd')) {
-      const val = String(rec[f]||'')
+    if (f.toLowerCase().includes('code') || f.toLowerCase().includes('icd')) {
+      const val = String(rec[f] || '')
       if (val.length > 10 && /\s/.test(val)) {
         errors.push({ field: f, type:'terminology', tag:'Terminology', cls:'err-tag--term',
           detail:`'${f}' looks like a description, not a code.` })
@@ -129,7 +209,9 @@ function PatientCheckBanner({ resources }) {
   const hasPatient = patientData.length > 0
   const samplePatient = patientData[0] || {}
   const name = samplePatient.name || samplePatient.patient_name || samplePatient.first_name || '—'
-  const dob  = samplePatient.birth_date || samplePatient.dob || '—'
+  // Support both FHIR camelCase (birthDate) and snake_case (birth_date); truncate to YYYY-MM-DD
+  const dobRaw = samplePatient.birthDate || samplePatient.birth_date || samplePatient.dob || ''
+  const dob = dobRaw ? dobRaw.slice(0, 10) : '—'
   const gender = samplePatient.gender || '—'
 
   return (
@@ -160,25 +242,58 @@ function PatientCheckBanner({ resources }) {
 
 // ── API Push Plan ────────────────────────────────────────────────
 function ApiPushPlan({ availableKeys }) {
+  // Split into pushable (has endpoint) vs skipped (no endpoint)
+  const pushable = []
+  const skipped = []
   const ordered = ['patient', ...availableKeys.filter(k => k !== 'patient' && k !== 'patients')]
+  for (const k of ordered) {
+    if (DRCHRONO_ENDPOINTS[k]) pushable.push(k)
+    else skipped.push(k)
+  }
+
   return (
-    <div className="vld-push-plan">
-      <div className="vld-push-plan__title">📡 API Push Plan — DrChrono Endpoints</div>
-      <div className="vld-push-plan__list">
-        {ordered.map((k, i) => {
-          const ep = DRCHRONO_ENDPOINTS[k]
-          if (!ep) return null
-          return (
-            <div key={k} className="vld-push-plan__row">
-              <span className="vld-push-plan__step">{i + 1}</span>
-              <span className="vld-push-plan__label">{TAB_LABELS[k] || k}</span>
-              <span className={`vld-push-plan__method vld-push-plan__method--${ep.method.toLowerCase()}`}>{ep.method}</span>
-              <code className="vld-push-plan__path">{ep.path}</code>
-              <span className="vld-push-plan__note">{ep.note}</span>
-            </div>
-          )
-        })}
+    <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+      {/* Pushable resources */}
+      <div className="vld-push-plan">
+        <div className="vld-push-plan__title">📡 API Push Plan — DrChrono Endpoints ({pushable.length} resource{pushable.length !== 1 ? 's' : ''})</div>
+        <div className="vld-push-plan__list">
+          {pushable.map((k, i) => {
+            const ep = DRCHRONO_ENDPOINTS[k]
+            return (
+              <div key={k} className="vld-push-plan__row">
+                <span className="vld-push-plan__step">{i + 1}</span>
+                <span className="vld-push-plan__label">{TAB_LABELS[k] || k}</span>
+                <span className={`vld-push-plan__method vld-push-plan__method--${ep.method.toLowerCase()}`}>{ep.method}</span>
+                <code className="vld-push-plan__path">{ep.path}</code>
+                <span className="vld-push-plan__note">{ep.note}</span>
+              </div>
+            )
+          })}
+        </div>
       </div>
+
+      {/* Skipped resources — no valid API endpoint */}
+      {skipped.length > 0 && (
+        <div className="vld-push-plan" style={{ borderColor:'#FDE68A' }}>
+          <div className="vld-push-plan__title" style={{ background:'#FFFBEB', color:'#92400E' }}>
+            ⚠️ Skipped Resources — No DrChrono API Endpoint ({skipped.length})
+          </div>
+          <div className="vld-push-plan__list">
+            {skipped.map(k => (
+              <div key={k} className="vld-push-plan__row" style={{ opacity: 0.7 }}>
+                <span className="vld-push-plan__step" style={{ background:'#D1D5DB', fontSize:'0.55rem' }}>–</span>
+                <span className="vld-push-plan__label">{TAB_LABELS[k] || k}</span>
+                <span style={{ fontSize:'0.68rem', color:'#92400E', background:'#FEF3C7', padding:'2px 8px', borderRadius:4 }}>
+                  No endpoint
+                </span>
+                <span className="vld-push-plan__note" style={{ color:'#92400E' }}>
+                  This resource type will be skipped during push.
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

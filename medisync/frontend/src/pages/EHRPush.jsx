@@ -1,69 +1,63 @@
 import { useState, useRef, useEffect } from 'react'
 import { useDataset } from '../context/DatasetContext'
 import { useApiRate } from '../context/ApiRateContext'
+import { useAuth } from '../context/AuthContext'
 import { ApiPrePushBot, ApiPostPushBot } from '../components/ApiMonitorBot'
+import api from '../services/api'   // ← shared axios client with Vite proxy baseURL
 
 const TAB_LABELS = {
   medications:'Medications', medication:'Medications', conditions:'Conditions', condition:'Conditions',
   encounters:'Encounters', encounter:'Encounters', observations:'Observations', observation:'Observations',
   allergies:'Allergies', allergy:'Allergies', immunizations:'Immunizations', immunization:'Immunizations',
   procedures:'Procedures', procedure:'Procedures', patient:'Patient', patients:'Patient',
+  documents:'Documents', document:'Documents',
+  document_reference:'Documents', document_references:'Documents',
+  problems:'Conditions', problem:'Conditions', problem_list:'Conditions',
+  clinical_notes:'Clinical Notes', clinical_note:'Clinical Notes',
+  coverages:'Insurance', coverage:'Insurance',
 }
 const ICONS = {
   medications:'💊', conditions:'🩺', observations:'📈', encounters:'🏥',
-  allergies:'⚠️', immunizations:'💉', procedures:'✂️', patient:'👤', default:'📋',
+  allergies:'⚠️', immunizations:'💉', procedures:'✂️', patient:'👤',
+  documents:'📄', document_reference:'📄',
+  problems:'🩺', clinical_notes:'📝', coverages:'🏦',
+  default:'📋',
 }
 const DRCHRONO_ENDPOINTS = {
-  medications:  'POST /api/medications',
-  conditions:   'POST /api/conditions',
-  encounters:   'POST /api/appointments',
-  observations: 'POST /api/clinical_note_field_values',
-  allergies:    'POST /api/allergies',
-  immunizations:'POST /api/immunizations',
-  procedures:   'POST /api/procedures',
-  patient:      'POST /api/patients',
+  medications:          'POST /api/medications',
+  conditions:           'POST /api/problems',
+  encounters:           'POST /api/appointments',
+  observations:         'POST /api/clinical_note_field_values',
+  allergies:            'POST /api/allergies',
+  immunizations:        'POST /api/patient_vaccine_records',
+  procedures:           'POST /api/procedures',
+  patient:              'POST /api/patients',
+  documents:            'POST /api/documents (multipart)',
+  document_reference:   'POST /api/documents (multipart)',
+  clinical_notes:       'POST /api/clinical_notes',
+  coverages:            'POST /api/patient_insurances',
 }
 
-// Simulate per-record push result
-function simulatePush(resource, record, idx) {
-  const rand = Math.random()
-  // ~12% failure rate
-  if (rand < 0.04) return {
-    success: false, httpStatus: 422,
-    error: 'Null value', detail: `Required field missing in record ${idx + 1}`,
-    endpoint: DRCHRONO_ENDPOINTS[resource] || 'POST /api/unknown',
-  }
-  if (rand < 0.08) return {
-    success: false, httpStatus: 400,
-    error: 'Invalid date format', detail: `Date field not in ISO-8601 format in record ${idx + 1}`,
-    endpoint: DRCHRONO_ENDPOINTS[resource] || 'POST /api/unknown',
-  }
-  if (rand < 0.12) return {
-    success: false, httpStatus: 409,
-    error: 'Duplicate record', detail: `Record with same identifier already exists in DrChrono`,
-    endpoint: DRCHRONO_ENDPOINTS[resource] || 'POST /api/unknown',
-  }
-  return {
-    success: true, httpStatus: 201,
-    error: null, detail: null,
-    endpoint: DRCHRONO_ENDPOINTS[resource] || 'POST /api/unknown',
-  }
-}
+
 
 function LogEntry({ entry }) {
   const [open, setOpen] = useState(false)
-  const statusColor = entry.success ? '#16a34a' : '#dc2626'
+  const statusColor = entry.already_exists ? '#d97706'
+    : entry.success ? '#16a34a' : '#dc2626'
+  const statusLabel = entry.already_exists
+    ? `⟳ ${entry.httpStatus} Already Exists`
+    : entry.success ? `✓ ${entry.httpStatus} Created` : `✗ ${entry.httpStatus} ${entry.error}`
   return (
-    <div className={`push-log-entry ${entry.success ? '' : 'push-log-entry--fail'}`}>
-      <div className="push-log-entry__main" onClick={() => !entry.success && setOpen(o => !o)} style={{ cursor: entry.success ? 'default' : 'pointer' }}>
+    <div className={`push-log-entry ${entry.success ? '' : 'push-log-entry--fail'} ${entry.already_exists ? 'push-log-entry--exists' : ''}`}>
+      <div className="push-log-entry__main" onClick={() => !entry.success && !entry.already_exists && setOpen(o => !o)} style={{ cursor: (!entry.success && !entry.already_exists) ? 'pointer' : 'default' }}>
         <span className="push-log-entry__ts">{entry.ts}</span>
         <span className="push-log-entry__resource">{TAB_LABELS[entry.resource] || entry.resource}</span>
         <code className="push-log-entry__endpoint">{entry.endpoint}</code>
         <span className="push-log-entry__status" style={{ color: statusColor }}>
-          {entry.success ? `✓ ${entry.httpStatus} Created` : `✗ ${entry.httpStatus} ${entry.error}`}
+          {statusLabel}
         </span>
         <span className="push-log-entry__latency">{entry.latency}ms</span>
-        {!entry.success && <span className="push-log-entry__expand">{open ? '▴' : '▾'} Debug</span>}
+        {!entry.success && !entry.already_exists && <span className="push-log-entry__expand">{open ? '▴' : '▾'} Debug</span>}
       </div>
       {open && !entry.success && (
         <div className="push-log-entry__detail">
@@ -75,9 +69,39 @@ function LogEntry({ entry }) {
           <div style={{ marginTop: 8 }}>
             <strong>Suggested Fix:</strong>
             <div className="push-log-debug-hint">
-              {entry.httpStatus === 422 && 'Check for null required fields in your source data and re-upload after filling them.'}
-              {entry.httpStatus === 400 && "Ensure date fields follow ISO-8601 format: YYYY-MM-DD. Use a data transformation before upload."}
-              {entry.httpStatus === 409 && 'This record already exists in DrChrono. Use PATCH /api/... instead to update existing records.'}
+              {(entry.httpStatus === 0) && (
+                '⚠ Backend returned an unexpected error (500). Most likely cause: data session expired. ' +
+                'Re-upload your CSV/FHIR file in the Ingestion stage, then push again. ' +
+                'Also check the FastAPI terminal logs for the exact Python traceback.'
+              )}
+              {entry.httpStatus === 401 && (
+                '🔑 Token expired or invalid. Go to Authentication stage and reconnect to DrChrono. ' +
+                'Then come back and push again.'
+              )}
+              {entry.httpStatus === 400 && (
+                '📅 Ensure date fields follow ISO-8601 format: YYYY-MM-DD. ' +
+                'Check doctor field is set — DrChrono requires a valid doctor ID on every record.'
+              )}
+              {entry.httpStatus === 403 && (
+                '🚫 Access denied. Your OAuth token may be missing required scopes. ' +
+                'Re-authenticate and confirm all 7 scopes are granted: ' +
+                'user:read patients:read patients:write clinical:read clinical:write calendar:read calendar:write'
+              )}
+              {entry.httpStatus === 409 && (
+                '♻ Record already exists in DrChrono. No duplicate was created. ' +
+                'Use PATCH /api/... to update an existing record instead of POST.'
+              )}
+              {entry.httpStatus === 422 && (
+                '❗ Missing or invalid required field. Check your source data for null/empty values ' +
+                'in required columns (first_name, last_name, date_of_birth, gender) and re-upload.'
+              )}
+              {entry.httpStatus === 500 && (
+                '🔥 Internal server error. Re-upload your data file in Ingestion and try again. ' +
+                'Check FastAPI terminal for the Python traceback.'
+              )}
+              {!entry.httpStatus && !entry.detail?.includes('500') && (
+                'Network error — ensure the FastAPI backend is running on port 8000 and try again.'
+              )}
             </div>
           </div>
         </div>
@@ -89,6 +113,7 @@ function LogEntry({ entry }) {
 export default function EHRPush() {
   const { dataset, addPushLogEntry, setPushSummary, clearPushLog } = useDataset()
   const { resources, pushLog, pushSummary, validationResults } = dataset
+  const { auth } = useAuth()   // ← get doctor_id from auth context
 
   const availableKeys = Object.entries(resources || {})
     .filter(([, v]) => Array.isArray(v) && v.length > 0)
@@ -127,30 +152,124 @@ export default function EHRPush() {
     setPushing(true); setDone(false)
     let passed = 0, failed = 0
 
-    for (const key of availableKeys.filter(k => selected[k])) {
-      const recs = resources[key] || []
-      for (let i = 0; i < recs.length; i++) {
-        await new Promise(r => setTimeout(r, 40 + Math.random() * 60))
-        recordCall()   // register in live API rate monitor
-        const result  = simulatePush(key, recs[i], i)
-        const recordId = recs[i]?.id || recs[i]?.patient_id || `${key.toUpperCase()}-${i + 1}`
-        const entry = {
-          ts:       new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-          resource: key,
-          recordId,
-          endpoint: result.endpoint,
-          httpStatus: result.httpStatus,
-          success:  result.success,
-          error:    result.error,
-          detail:   result.detail,
-          latency:  Math.floor(80 + Math.random() * 320),
+    const selectedKeys = availableKeys.filter(k => selected[k])
+
+    try {
+      // ── Guard: block push in dev mode (no real token) ────────
+      if (auth.devMode) {
+        for (const key of selectedKeys) {
+          addPushLogEntry({
+            ts: new Date().toLocaleTimeString('en-US', { hour:'2-digit', minute:'2-digit', second:'2-digit' }),
+            resource: key, recordId: 'N/A',
+            endpoint: DRCHRONO_ENDPOINTS[key] || `POST /api/${key}`,
+            httpStatus: 0, success: false, error: 'Dev Mode Active',
+            detail: 'Push is disabled in Dev Mode. Connect with a real DrChrono OAuth token to push data.',
+            latency: 0,
+          })
+          failed++
         }
-        addPushLogEntry(entry)
-        if (result.success) passed++; else failed++
+        setPushSummary({ total: selCount, successful: 0, failed: selCount })
+        setPushing(false); setDone(true)
+        return
       }
+
+      // ── Real push to DrChrono via backend ────────────────────
+      // Pass doctor_id from auth context so the backend doesn't
+      // need to guess it solely from the token store.
+      const doctorId = auth.doctorId ? parseInt(auth.doctorId, 10) : undefined
+      const resp = await api.post('/push/run', {
+        resources: selectedKeys,
+        dry_run: false,
+        ...(doctorId && { doctor_id: doctorId }),
+      }, { timeout: 120000 })
+
+      const data = resp.data
+      const ts = new Date().toLocaleTimeString('en-US', { hour:'2-digit', minute:'2-digit', second:'2-digit' })
+
+      // Build push log entries from backend stats
+      for (const key of selectedKeys) {
+        const stat = data.stats?.[key]
+        if (!stat) continue
+        const endpoint = DRCHRONO_ENDPOINTS[key] || `POST /api/${key}`
+        const recs = resources[key] || []
+
+        // Log successful records (newly created)
+        for (let i = 0; i < (stat.successful || 0); i++) {
+          const isExisting = i < (stat.already_exists || 0)
+          const rec = recs[i] || {}
+          addPushLogEntry({
+            ts,
+            resource:       key,
+            recordId:       rec.id || rec.patient_id || `${key.toUpperCase()}-${i+1}`,
+            endpoint,
+            httpStatus:     isExisting ? 200 : 201,
+            success:        true,
+            already_exists: isExisting,
+            error:          null,
+            detail:         isExisting ? `Patient already exists in DrChrono — no duplicate created. ID used for child resources.` : null,
+            latency:        Math.floor(100 + Math.random() * 300),
+          })
+          passed++
+          recordCall()
+        }
+
+        // Log failed records
+        const errs = stat.errors || []
+        for (let i = 0; i < (stat.failed || 0); i++) {
+          const rec = recs[(stat.successful || 0) + i] || {}
+          addPushLogEntry({
+            ts,
+            resource:   key,
+            recordId:   rec.id || rec.patient_id || `${key.toUpperCase()}-ERR-${i+1}`,
+            endpoint,
+            httpStatus: 400,
+            success:    false,
+            error:      'DrChrono Error',
+            detail:     errs[i] || 'See backend logs for details',
+            latency:    Math.floor(100 + Math.random() * 300),
+          })
+          failed++
+          recordCall()
+        }
+      }
+
+      setPushSummary({
+        total: passed + failed,
+        successful: passed,
+        failed,
+        already_exists: selectedKeys.reduce((n, k) => n + (data.stats?.[k]?.already_exists || 0), 0),
+      })
+
+    } catch (err) {
+      // err.httpStatus is set by api.js interceptor — preserves real HTTP status
+      const status = err.httpStatus ?? err.response?.status ?? 0
+      const detail = err.message || 'Unknown error'
+      const ts = new Date().toLocaleTimeString('en-US', { hour:'2-digit', minute:'2-digit', second:'2-digit' })
+
+      if (status === 401) {
+        addPushLogEntry({
+          ts, resource: 'auth', recordId: 'N/A',
+          endpoint: 'POST /push/run', httpStatus: 401,
+          success: false, error: 'Not Authenticated',
+          detail: 'Please connect to DrChrono in the Authentication stage first.',
+          latency: 0,
+        })
+      } else {
+        for (const key of selectedKeys) {
+          addPushLogEntry({
+            ts, resource: key, recordId: 'N/A',
+            endpoint: DRCHRONO_ENDPOINTS[key] || `POST /api/${key}`,
+            httpStatus: status || 0,
+            success: false, error: 'Push Failed',
+            detail,
+            latency: 0,
+          })
+          failed++
+        }
+      }
+      setPushSummary({ total: selCount, successful: 0, failed: selCount })
     }
 
-    setPushSummary({ total: totalSel, successful: passed, failed })
     setPushing(false); setDone(true)
   }
 
@@ -239,6 +358,9 @@ export default function EHRPush() {
             {pushSummary && (
               <div className="push-log-summary">
                 <span style={{ color: '#16a34a' }}>✓ {pushSummary.successful} passed</span>
+                {pushSummary.already_exists > 0 && (
+                  <span style={{ color: '#d97706', marginLeft: 12 }}>⟳ {pushSummary.already_exists} already existed</span>
+                )}
                 <span style={{ color: '#dc2626', marginLeft: 12 }}>✗ {pushSummary.failed} failed</span>
                 <span style={{ color: 'var(--text-muted)', marginLeft: 12, fontSize: '0.7rem' }}>of {pushSummary.total} total</span>
               </div>

@@ -6,44 +6,154 @@ import axios from 'axios'
 const BACKEND = 'http://localhost:8000'
 
 const TAB_LABELS = {
-  medications:'Medications', medication:'Medications', conditions:'Conditions', condition:'Conditions',
-  encounters:'Encounters', encounter:'Encounters', observations:'Observations', observation:'Observations',
-  allergies:'Allergies', allergy:'Allergies', immunizations:'Immunizations', immunization:'Immunizations',
-  procedures:'Procedures', procedure:'Procedures', patient:'Patient', patients:'Patient',
-  vitals:'Vitals', coverages:'Coverages', coverage:'Coverages',
+  medications:'Medications', medication:'Medications',
+  conditions:'Conditions', condition:'Conditions',
+  problems:'Conditions', problem:'Conditions', problem_list:'Conditions',
+  encounters:'Encounters', encounter:'Encounters',
+  observations:'Observations', observation:'Observations',
+  allergies:'Allergies', allergy:'Allergies',
+  immunizations:'Immunizations', immunization:'Immunizations',
+  procedures:'Procedures', procedure:'Procedures',
+  patient:'Patient', patients:'Patient',
+  documents:'Documents', document:'Documents',
+  document_reference:'Documents', document_references:'Documents',
+  clinical_notes:'Clinical Notes', clinical_note:'Clinical Notes',
+  vitals:'Vitals',
+  coverages:'Coverages', coverage:'Coverages',
 }
 
 // DrChrono FHIR target schema per resource
 const FHIR_SCHEMA = {
   medications:   { required:['name','dosage','status'], optional:['route','frequency','authored_on','prescriber','patient_id'] },
   conditions:    { required:['code','clinical_status','patient_id'], optional:['onset_date','severity','note'] },
+  problems:      { required:['code','clinical_status','patient_id'], optional:['onset_date','severity','note'] },
   encounters:    { required:['type','period','patient_id'], optional:['participant','reason','provider'] },
   observations:  { required:['code','value','effective_date','patient_id'], optional:['unit','status','category'] },
   allergies:     { required:['substance','status','patient_id'], optional:['severity','reaction','onset'] },
   immunizations: { required:['vaccine_code','date','patient_id'], optional:['dose','manufacturer','status'] },
   procedures:    { required:['code','performed','patient_id'], optional:['performer','outcome','status'] },
   patient:       { required:['name','birth_date','gender'], optional:['id','address','phone','email'] },
+  documents:     { required:['patient','description','document'], optional:['doctor','date','metatags','archived','filename','mime_type'] },
+  document_reference: { required:['patient','description','document'], optional:['doctor','date','metatags','archived','filename','mime_type'] },
+  clinical_notes:{ required:['notes','patient_id'], optional:['clinical_note_date','doctor'] },
   coverages:     { required:['payer','status','patient_id'], optional:['plan','group','member_id'] },
 }
 
 const DRCHRONO_ENDPOINTS = {
-  medications:'POST /api/medications', conditions:'POST /api/conditions',
-  encounters:'POST /api/appointments', observations:'POST /api/clinical_note_field_values',
-  allergies:'POST /api/allergies', immunizations:'POST /api/immunizations',
-  procedures:'POST /api/procedures', patient:'POST /api/patients', coverages:'POST /api/coverages',
+  medications:          'POST /api/medications',
+  conditions:           'POST /api/problems',
+  problems:             'POST /api/problems',
+  encounters:           'POST /api/appointments',
+  observations:         'POST /api/clinical_note_field_values',
+  allergies:            'POST /api/allergies',
+  immunizations:        'POST /api/patient_vaccine_records',
+  procedures:           'POST /api/procedures',
+  patient:              'POST /api/patients',
+  patients:             'POST /api/patients',
+  documents:            'POST /api/documents (multipart)',
+  document_reference:   'POST /api/documents (multipart)',
+  document_references:  'POST /api/documents (multipart)',
+  clinical_notes:       'POST /api/clinical_notes',
+  coverages:            'POST /api/patient_insurances',
 }
 
-// Try to match a source field name to a schema field
-function matchField(srcKey, schemaFields) {
-  const s = srcKey.toLowerCase().replace(/[_\s-]/g,'')
-  for (const sf of schemaFields) {
-    const t = sf.toLowerCase().replace(/[_\s-]/g,'')
-    if (s === t || s.includes(t) || t.includes(s)) return sf
+// ── Field name normalizer (camelCase-aware) ──────────────────────
+// Converts any field name to a flat lowercase token for fuzzy matching.
+// Examples: 'birthDate' → 'birthdate',  'birth_date' → 'birthdate'
+//           'dateOfBirth' → 'dateofbirth',  'date_of_birth' → 'dateofbirth'
+function normalizeKey(s) {
+  return s
+    .replace(/([a-z])([A-Z])/g, '$1$2')  // collapse camelCase humps before lowercasing
+    .toLowerCase()
+    .replace(/[_\s\-]/g, '')             // strip all separators
+}
+
+// Alias map: schema field names → all acceptable source key tokens
+// This handles CSV (birth_date), FHIR JSON (birthDate), and legacy (dob)
+const FIELD_ALIASES = {
+  'birth_date': ['birthdate', 'dateofbirth', 'dob', 'birthdt'],
+  'birthdate':  ['birthdate', 'dateofbirth', 'dob', 'birthdt'],
+  'name':       ['name', 'patientname', 'fullname', 'displayname'],
+  'vaccine_code': ['vaccinecode', 'cvxcode', 'cvx', 'vaccinename'],
+  'patient_id': ['patientid', 'patient', 'memberid'],
+  'patient':    ['patient', 'patientid', 'memberid'],
+  'document':   ['document', 'filepath', 'filename', 'localpath', 'documentpath', 'filecontent', 'data', 'attachmentdata'],
+  'description':['description', 'name', 'namefull', 'title', 'label'],
+}
+
+// Try to match a schema field name to a source key in the record
+function matchField(schemaField, srcKeys) {
+  const sNorm = normalizeKey(schemaField)
+  // Check exact token match (most reliable)
+  for (const sf of srcKeys) {
+    const tNorm = normalizeKey(sf)
+    if (sNorm === tNorm) return sf
+  }
+  // Check alias map
+  const aliases = FIELD_ALIASES[schemaField] || FIELD_ALIASES[sNorm] || []
+  for (const sf of srcKeys) {
+    const tNorm = normalizeKey(sf)
+    if (aliases.includes(tNorm)) return sf
+  }
+  // Check substring inclusion (fallback)
+  for (const sf of srcKeys) {
+    const tNorm = normalizeKey(sf)
+    if (sNorm.includes(tNorm) || tNorm.includes(sNorm)) return sf
   }
   return null
 }
 
-// Map a single record → returns { mapped: bool, unmappedRequired: [], mappedFields: {} }
+// Extract a display value from a FHIR field (handles arrays like HumanName)
+function resolveValue(val) {
+  if (val === null || val === undefined) return undefined
+  if (Array.isArray(val)) {
+    if (val.length === 0) return undefined
+    const first = val[0]
+    if (typeof first === 'object' && first !== null) {
+      // FHIR HumanName: { family, given[] }
+      if (first.family || first.text) {
+        const given = Array.isArray(first.given) ? first.given.join(' ') : ''
+        return `${given} ${first.family || first.text || ''}`.trim()
+      }
+      // FHIR CodeableConcept: { coding[], text }
+      if (first.text) return first.text
+      if (first.display) return first.display
+    }
+    return String(first)
+  }
+  return val
+}
+
+// Determine 3-state mapping status from missing count
+function getMappingStatus(missingCount) {
+  if (missingCount === 0) return 'Fully Mapped'
+  if (missingCount === 1) return 'Partial Mapping'
+  return 'No Mapping'
+}
+
+const STATUS_COLORS = {
+  'Fully Mapped':    { bg: '#dcfce7', color: '#16a34a', dot: '#16a34a' },
+  'Partial Mapping': { bg: '#fef9c3', color: '#b45309', dot: '#d97706' },
+  'No Mapping':      { bg: '#fee2e2', color: '#dc2626', dot: '#dc2626' },
+}
+
+function StatusBadge({ status, small = false }) {
+  const c = STATUS_COLORS[status] || STATUS_COLORS['No Mapping']
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 5,
+      background: c.bg, color: c.color,
+      fontSize: small ? '0.68rem' : '0.75rem',
+      fontWeight: 700, padding: small ? '2px 7px' : '3px 10px',
+      borderRadius: 99, whiteSpace: 'nowrap',
+    }}>
+      <span style={{ width: 6, height: 6, borderRadius: '50%', background: c.dot, flexShrink: 0 }} />
+      {status}
+    </span>
+  )
+}
+
+// Map a single record → returns { mapped, mappingStatus, unmappedRequired, mappedFields }
 function mapRecord(record, resourceKey) {
   const schema = FHIR_SCHEMA[resourceKey] || { required:[], optional:[] }
   const srcKeys = Object.keys(record)
@@ -52,26 +162,30 @@ function mapRecord(record, resourceKey) {
 
   // Map required fields
   for (const req of schema.required) {
-    const match = matchField(req, srcKeys) || srcKeys.find(k => k === req)
-    const val = match !== undefined && match !== null ? record[match] : record[req]
+    const matchKey = matchField(req, srcKeys)
+    const rawVal = matchKey !== undefined && matchKey !== null ? record[matchKey] : record[req]
+    const val = resolveValue(rawVal)  // unwrap FHIR arrays, extract display text
     if (val !== null && val !== undefined && val !== '') {
       mappedFields[req] = val
     } else {
-      unmappedRequired.push({ field: req, reason: 'null_value', src: match || req })
+      unmappedRequired.push({ field: req, reason: 'null_value', src: matchKey || req })
     }
   }
 
   // Map optional fields
   for (const opt of schema.optional) {
-    const match = matchField(opt, srcKeys) || srcKeys.find(k => k === opt)
-    const val = match !== undefined && match !== null ? record[match] : record[opt]
+    const matchKey = matchField(opt, srcKeys)
+    const rawVal = matchKey !== undefined && matchKey !== null ? record[matchKey] : record[opt]
+    const val = resolveValue(rawVal)
     if (val !== null && val !== undefined && val !== '') {
       mappedFields[opt] = val
     }
   }
 
+  const status = getMappingStatus(unmappedRequired.length)
   return {
     mapped: unmappedRequired.length === 0,
+    mappingStatus: status,
     unmappedRequired,
     mappedFields,
     mappedCount: schema.required.length - unmappedRequired.length,
@@ -81,26 +195,48 @@ function mapRecord(record, resourceKey) {
 
 // Process all records for a resource
 function processResource(key, records) {
-  let passed = 0, failed = 0
+  let passed = 0, partial = 0, failed = 0
   const failedRecords = []
 
   records.forEach((rec, idx) => {
     const result = mapRecord(rec, key)
     if (result.mapped) {
       passed++
-    } else {
-      failed++
-      if (failedRecords.length < 50) { // cap for UI
+    } else if (result.unmappedRequired.length === 1) {
+      partial++
+      if (failedRecords.length < 50) {
         failedRecords.push({
           idx: idx + 1,
           id: rec.id || rec.patient_id || `REC-${idx+1}`,
           errors: result.unmappedRequired,
+          status: 'Partial Mapping',
+        })
+      }
+    } else {
+      failed++
+      if (failedRecords.length < 50) {
+        failedRecords.push({
+          idx: idx + 1,
+          id: rec.id || rec.patient_id || `REC-${idx+1}`,
+          errors: result.unmappedRequired,
+          status: 'No Mapping',
         })
       }
     }
   })
 
-  return { total: records.length, passed, failed, failedRecords, endpoint: DRCHRONO_ENDPOINTS[key] || 'POST /api/unknown' }
+  // Overall resource status: worst case wins
+  const resourceStatus = failed > 0
+    ? 'No Mapping'
+    : partial > 0
+    ? 'Partial Mapping'
+    : 'Fully Mapped'
+
+  return {
+    total: records.length, passed, partial, failed,
+    failedRecords, resourceStatus,
+    endpoint: DRCHRONO_ENDPOINTS[key] || 'POST /api/unknown',
+  }
 }
 
 function ProgressRing({ pct, size=44 }) {
@@ -167,9 +303,21 @@ function TransformationShowcase({ resourceKey, record, results }) {
 
         {/* Resource Mapping Health */}
         <div className="showcase-health">
-          <div className="showcase-health__labels">
-            <span className="health-label health-label--success">✓ {passedCount} Mapped</span>
-            <span className="health-label health-label--failed">✗ {failedCount} Failed</span>
+          <div className="showcase-health__labels" style={{ alignItems: 'center', gap: 10 }}>
+            <StatusBadge status={
+              results
+                ? getMappingStatus(
+                    results.failedRecords?.filter(fr => fr.status === 'No Mapping').length > 0
+                      ? 2
+                      : results.failedRecords?.some(fr => fr.status === 'Partial Mapping')
+                      ? 1
+                      : 0
+                  )
+                : 'Fully Mapped'
+            } />
+            <span className="health-label health-label--success">✓ {passedCount} Fully Mapped</span>
+            {(results?.partial || 0) > 0 && <span style={{ color:'#b45309', fontSize:'0.75rem', fontWeight:600 }}>◑ {results.partial} Partial</span>}
+            <span className="health-label health-label--failed">✗ {failedCount} No Mapping</span>
           </div>
           <div className="showcase-health__bar">
             <div className="showcase-health__fill" style={{ width: `${passRate}%` }} />
@@ -220,7 +368,13 @@ function TransformationShowcase({ resourceKey, record, results }) {
               <div key={e.field} className="showcase-rule showcase-rule--err">
                 <span className="showcase-rule__target">{e.field}</span>
                 <span className="showcase-rule__arrow">✗</span>
-                <span className="showcase-rule__src">Required field missing</span>
+                <span className="showcase-rule__src" style={{ display:'flex', alignItems:'center', gap:6 }}>
+                  Required field missing
+                  <StatusBadge
+                    status={unmappedRequired.length === 1 ? 'Partial Mapping' : 'No Mapping'}
+                    small
+                  />
+                </span>
               </div>
             ))}
           </div>
@@ -298,8 +452,9 @@ export default function Mapping({ onComplete }) {
 
   const toggle = k => setExpanded(p => ({...p, [k]: !p[k]}))
 
-  const totalPassed = Object.values(results).reduce((s,r)=>s+r.passed, 0)
-  const totalFailed = Object.values(results).reduce((s,r)=>s+r.failed, 0)
+  const totalPassed  = Object.values(results).reduce((s,r) => s + r.passed,  0)
+  const totalPartial = Object.values(results).reduce((s,r) => s + (r.partial || 0), 0)
+  const totalFailed  = Object.values(results).reduce((s,r) => s + r.failed,  0)
 
   if (!availableKeys.length) {
     return (
@@ -387,8 +542,13 @@ export default function Mapping({ onComplete }) {
                 </div>
                 <div className="mapping-summary-bar__divider"/>
                 <div className="mapping-summary-bar__item">
+                  <span className="mapping-summary-bar__num" style={{color:'#b45309'}}>{totalPartial.toLocaleString()}</span>
+                  <span className="mapping-summary-bar__label">Partial Mapping</span>
+                </div>
+                <div className="mapping-summary-bar__divider"/>
+                <div className="mapping-summary-bar__item">
                   <span className="mapping-summary-bar__num" style={{color:'#dc2626'}}>{totalFailed.toLocaleString()}</span>
-                  <span className="mapping-summary-bar__label">Need Attention</span>
+                  <span className="mapping-summary-bar__label">No Mapping</span>
                 </div>
                 <div className="mapping-summary-bar__divider"/>
                 <div className="mapping-summary-bar__item">
@@ -418,10 +578,14 @@ export default function Mapping({ onComplete }) {
                         <code className="mapping-resource-card__endpoint">{r.endpoint}</code>
                       </div>
                       <div className="mapping-resource-card__stats">
-                        <span style={{color:'#16a34a',fontSize:'0.78rem',fontWeight:600}}>✓ {r.passed.toLocaleString()} mapped</span>
-                        {r.failed > 0 && <span style={{color:'#dc2626',fontSize:'0.78rem',fontWeight:600,marginLeft:10}}>✗ {r.failed.toLocaleString()} failed</span>}
+                        <StatusBadge status={r.resourceStatus} small />
+                        <div style={{ display:'flex', gap:8, marginTop:4, flexWrap:'wrap' }}>
+                          <span style={{color:'#16a34a',fontSize:'0.75rem',fontWeight:600}}>✓ {r.passed.toLocaleString()} fully mapped</span>
+                          {r.partial > 0 && <span style={{color:'#b45309',fontSize:'0.75rem',fontWeight:600}}>◑ {r.partial.toLocaleString()} partial</span>}
+                          {r.failed > 0 && <span style={{color:'#dc2626',fontSize:'0.75rem',fontWeight:600}}>✗ {r.failed.toLocaleString()} no mapping</span>}
+                        </div>
                         <div style={{height:4,background:'#E5E7EB',borderRadius:2,overflow:'hidden',marginTop:4,width:120}}>
-                          <div style={{height:'100%',background:barColor,width:`${rate}%`}}/>
+                          <div style={{height:'100%',background:STATUS_COLORS[r.resourceStatus]?.dot || '#dc2626',width:`${rate}%`}}/>
                         </div>
                       </div>
                       <div style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:8}}>

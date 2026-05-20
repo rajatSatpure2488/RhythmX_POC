@@ -420,7 +420,15 @@
 .push-log-summary { font-size:0.78rem;font-weight:500; }
 .push-log-progress { height:3px;background:#E5E7EB; }
 .push-log-progress__fill { height:100%;background:var(--primary);transition:width 0.2s; }
-.push-log-body { max-height:320px;overflow-y:auto;font-family:monospace;font-size:0.72rem; }
+.push-log-body {
+  max-height: 520px;          /* was 320px — too short when detail panels expand */
+  overflow-y: auto;
+  overflow-x: hidden;         /* prevent horizontal stretch from long error text */
+  font-family: monospace;
+  font-size: 0.72rem;
+  -webkit-overflow-scrolling: touch;  /* smooth momentum scroll on mobile/trackpad */
+  scroll-behavior: smooth;
+}
 .push-log-entry { border-bottom:1px solid var(--border); }
 .push-log-entry--fail { background:#FFF8F8; }
 .push-log-entry__main { display:flex;align-items:center;gap:10px;padding:7px 14px;flex-wrap:nowrap;overflow:hidden; }
@@ -430,8 +438,20 @@
 .push-log-entry__status { min-width:140px;flex-shrink:0;font-weight:600; }
 .push-log-entry__latency { color:var(--text-muted);min-width:44px;text-align:right;flex-shrink:0; }
 .push-log-entry__expand { font-size:0.65rem;color:var(--primary);cursor:pointer;flex-shrink:0;font-family:sans-serif; }
-.push-log-entry__detail { padding:10px 14px 14px 24px;background:#FEF2F2;border-top:1px dashed #FECACA;font-family:inherit;font-size:0.75rem;display:flex;flex-direction:column;gap:5px;line-height:1.6; }
-.push-log-debug-hint { margin-top:4px;background:#FFF;border:1px solid #FDE68A;padding:8px 10px;border-radius:4px;font-size:0.75rem;color:#92400E;line-height:1.5; }
+.push-log-entry__detail {
+  padding:10px 14px 14px 24px;
+  background:#FEF2F2;
+  border-top:1px dashed #FECACA;
+  font-family:inherit;
+  font-size:0.75rem;
+  display:flex;
+  flex-direction:column;
+  gap:5px;
+  line-height:1.6;
+  word-break: break-word;   /* prevent long error strings from overflowing */
+  overflow-wrap: anywhere;
+}
+.push-log-debug-hint { margin-top:4px;background:#FFF;border:1px solid #FDE68A;padding:8px 10px;border-radius:4px;font-size:0.75rem;color:#92400E;line-height:1.5;word-break:break-word; }
 
 /* ══════════════════════════════════════════════════════
    REVIEW — Tab scroll + Wide scrollable table

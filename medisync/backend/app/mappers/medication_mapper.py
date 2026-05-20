@@ -7,7 +7,7 @@ from .base_mapper import BaseRuleMapper
 class MedicationMapper(BaseRuleMapper):
     resource_type = "MedicationRequest"
     drchrono_endpoint = "/api/medications"
-    required_fields = ["patient", "appointment", "name"]
+    required_fields = ["doctor", "patient", "appointment", "name"]
 
     def _map_fields(self, fhir: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
         # Medication name from medicationCodeableConcept
@@ -33,6 +33,7 @@ class MedicationMapper(BaseRuleMapper):
         patient_id = self._extract_reference_id(fhir.get("subject"))
 
         return {
+            "doctor": ctx.get("doctor_id"),
             "patient": ctx.get("patient_id") or patient_id,
             "appointment": ctx.get("appointment_id"),
             "name": med_name,
@@ -40,6 +41,6 @@ class MedicationMapper(BaseRuleMapper):
             "dose_unit": dose_unit,
             "frequency": dosage_text,
             "status": fhir.get("status", "active"),
-            "start_date": fhir.get("authoredOn", ""),
+            "start_date": fhir.get("authoredOn", "")[:10] if fhir.get("authoredOn") else "",
             "notes": "",
         }

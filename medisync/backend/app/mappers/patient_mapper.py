@@ -40,14 +40,15 @@ class PatientMapper(BaseRuleMapper):
         lines = addr.get("line", [])
         street = ", ".join(lines) if lines else ""
 
-        # Gender normalization (FHIR: male/female/other → DrChrono: Male/Female/Other)
+        # Gender normalization (FHIR: male/female/other/unknown → DrChrono: Male/Female/Other/UNK)
         gender_raw = fhir.get("gender", "")
-        gender = gender_raw.capitalize() if gender_raw else ""
+        gender_map = {"male": "Male", "female": "Female", "other": "Other", "unknown": "UNK"}
+        gender = gender_map.get(gender_raw, gender_raw.capitalize() if gender_raw else "")
 
         return {
             "first_name": first_name,
             "last_name": last_name,
-            "date_of_birth": fhir.get("birthDate", ""),
+            "date_of_birth": fhir.get("birthDate", "")[:10] if fhir.get("birthDate") else "",
             "gender": gender,
             "doctor": ctx.get("doctor_id"),
             "email": email,

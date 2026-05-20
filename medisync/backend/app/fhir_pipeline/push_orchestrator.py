@@ -367,8 +367,9 @@ def _push_with_retry(
 
     url = f"{config.DRCHRONO_API_BASE}{endpoint}"
     headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
+        "Authorization":     f"Bearer {token}",
+        "Content-Type":      "application/json",
+        "X-DRC-API-Version": config.DRCHRONO_API_VERSION,   # v4 = Hunt Valley
     }
 
     push_retry = 0

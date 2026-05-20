@@ -6,7 +6,7 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 })
 
-// Response interceptor — normalise errors
+// Response interceptor — normalise errors while preserving HTTP status
 api.interceptors.response.use(
   (res) => res,
   (err) => {
@@ -15,7 +15,12 @@ api.interceptors.response.use(
       err.response?.data?.message ||
       err.message ||
       'An unexpected error occurred'
-    return Promise.reject(new Error(message))
+
+    // Preserve the real HTTP status so catch blocks can show the right code
+    const enriched = new Error(message)
+    enriched.httpStatus   = err.response?.status ?? 0
+    enriched.responseData = err.response?.data
+    return Promise.reject(enriched)
   }
 )
 

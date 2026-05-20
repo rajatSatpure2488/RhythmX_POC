@@ -42,6 +42,10 @@ DRCHRONO_CLIENT_ID:     str = os.getenv("DRCHRONO_CLIENT_ID", "")
 DRCHRONO_CLIENT_SECRET: str = os.getenv("DRCHRONO_CLIENT_SECRET", "")
 DRCHRONO_REDIRECT_URI:  str = os.getenv("DRCHRONO_REDIRECT_URI", "http://localhost:8501")
 
+# ── API Version — v4 = "Hunt Valley" ───────────────────────
+# Sent as the X-DRC-API-Version header on every DrChrono API call.
+DRCHRONO_API_VERSION:   str = os.getenv("DRCHRONO_API_VERSION", "v4")
+
 FRONTEND_URL:   str = os.getenv("FRONTEND_URL",  "http://localhost:8501")
 BACKEND_HOST:   str = os.getenv("BACKEND_HOST",  "0.0.0.0")
 BACKEND_PORT:   int = int(os.getenv("BACKEND_PORT", "8000"))
@@ -50,14 +54,16 @@ DRCHRONO_DAILY_LIMIT:  int = int(os.getenv("DRCHRONO_DAILY_LIMIT",  "500"))
 DRCHRONO_MINUTE_LIMIT: int = int(os.getenv("DRCHRONO_MINUTE_LIMIT", "29"))
 
 # ── DrChrono static URLs ────────────────────────────────────
-DRCHRONO_AUTH_URL:  str = "https://drchrono.com/o/authorize/"
-DRCHRONO_TOKEN_URL: str = "https://drchrono.com/o/token/"
-DRCHRONO_API_BASE:  str = "https://drchrono.com/api/"
+# OAuth endpoints live on drchrono.com; REST API lives on app.drchrono.com
+DRCHRONO_AUTH_URL:  str = "https://app.drchrono.com/o/authorize/"
+DRCHRONO_TOKEN_URL: str = "https://app.drchrono.com/o/token/"
+DRCHRONO_API_BASE:  str = "https://app.drchrono.com/api/"
 
 # ── Trace log each value (sanitized) ──────────────────────
 _log.info(f"[config] DRCHRONO_CLIENT_ID     = {'SET (' + DRCHRONO_CLIENT_ID[:8] + '...)' if DRCHRONO_CLIENT_ID else 'NOT SET ❌'}")
 _log.info(f"[config] DRCHRONO_CLIENT_SECRET = {'SET (hidden)' if DRCHRONO_CLIENT_SECRET else 'NOT SET ❌'}")
 _log.info(f"[config] DRCHRONO_REDIRECT_URI  = {DRCHRONO_REDIRECT_URI}")
+_log.info(f"[config] DRCHRONO_API_VERSION   = {DRCHRONO_API_VERSION}")
 _log.info(f"[config] FRONTEND_URL           = {FRONTEND_URL}")
 _log.info(f"[config] BACKEND_PORT           = {BACKEND_PORT}")
 
