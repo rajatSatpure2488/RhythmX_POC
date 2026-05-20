@@ -12,7 +12,7 @@ Architecture:
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Optional
+from typing import Any, ClassVar, Optional
 
 
 class MapperResult:
@@ -51,22 +51,10 @@ class MapperResult:
 class BaseRuleMapper(ABC):
     """Abstract base for all FHIR R5 → DrChrono rule-based mappers."""
 
-    @property
-    @abstractmethod
-    def resource_type(self) -> str:
-        """FHIR R5 resourceType (e.g. 'Patient')."""
-        ...
-
-    @property
-    @abstractmethod
-    def drchrono_endpoint(self) -> str:
-        """DrChrono POST endpoint (e.g. '/api/patients')."""
-        ...
-
-    @property
-    def required_fields(self) -> list[str]:
-        """DrChrono required fields (checked in validate)."""
-        return []
+    # Subclasses MUST set the first two; required_fields defaults to [].
+    resource_type: ClassVar[str] = ""
+    drchrono_endpoint: ClassVar[str] = ""
+    required_fields: ClassVar[list[str]] = []
 
     # ── Public API ────────────────────────────────────────────
 

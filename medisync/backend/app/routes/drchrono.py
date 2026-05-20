@@ -227,6 +227,7 @@ async def create_document(payload: Dict[str, Any] = Body(..., examples=[{
         filename=payload.get("filename", "document.pdf"),
         mime_type=payload.get("mime_type", "application/pdf"),
         metatags=payload.get("metatags", ""),
+        archived=payload.get("archived", False),
     )
 
 
@@ -344,6 +345,16 @@ async def create_eligibility(payload: Dict[str, Any] = Body(..., examples=[{
     """POST https://app.drchrono.com/api/eligibility_checks"""
     return drchrono_post("eligibility_checks", payload)
 
+@router.get("/patient_insurances", tags=["R10 - Coverages"], summary="List patient insurances")
+async def get_patient_insurances(patient: int = Query(None), doctor: int = Query(None)):
+    """GET https://app.drchrono.com/api/patient_insurances"""
+    return drchrono_get("patient_insurances", {"patient": patient, "doctor": doctor})
+
+@router.post("/patient_insurances", tags=["R10 - Coverages"], summary="Create patient insurance")
+async def create_patient_insurance(payload: Dict[str, Any] = Body(...)):
+    """POST https://app.drchrono.com/api/patient_insurances"""
+    return drchrono_post("patient_insurances", payload)
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # R11 — Service Requests (Tasks)
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -389,6 +400,16 @@ async def create_vaccine(payload: Dict[str, Any] = Body(..., examples=[{
     Required: patient, doctor, vaccine_inventory, administration_date"""
     return drchrono_post("patient_vaccine_records", payload)
 
+@router.get("/vaccines", tags=["R12 - Immunizations"], summary="List vaccines reference endpoint")
+async def get_vaccines_reference(patient: int = Query(None), doctor: int = Query(None)):
+    """GET https://app.drchrono.com/api/vaccines"""
+    return drchrono_get("vaccines", {"patient": patient, "doctor": doctor})
+
+@router.post("/vaccines", tags=["R12 - Immunizations"], summary="Create vaccine reference endpoint")
+async def create_vaccine_reference(payload: Dict[str, Any] = Body(...)):
+    """POST https://app.drchrono.com/api/vaccines"""
+    return drchrono_post("vaccines", payload)
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # R13 — Encounters (Appointments verbose + Amendments)
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -428,6 +449,16 @@ async def create_lab_order(payload: Dict[str, Any] = Body(..., examples=[{
     Required: doctor, patient, sublab. Use GET /api/sublabs for valid IDs."""
     return drchrono_post("lab_orders", payload)
 
+@router.get("/lab_results", tags=["R14 - Diagnostic Reports"], summary="List lab results reference endpoint")
+async def get_lab_results(patient: int = Query(None), doctor: int = Query(None), since: str = Query(None)):
+    """GET https://app.drchrono.com/api/lab_results"""
+    return drchrono_get("lab_results", {"patient": patient, "doctor": doctor, "since": since})
+
+@router.post("/lab_results", tags=["R14 - Diagnostic Reports"], summary="Create lab result reference endpoint")
+async def create_lab_result(payload: Dict[str, Any] = Body(...)):
+    """POST https://app.drchrono.com/api/lab_results"""
+    return drchrono_post("lab_results", payload)
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # R15 — Practitioners (Doctors + Users — READ-ONLY)
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -463,6 +494,16 @@ async def create_procedure(payload: Dict[str, Any] = Body(..., examples=[{
     """POST https://app.drchrono.com/api/procedures
     Required: doctor, patient, appointment, code"""
     return drchrono_post("procedures", payload)
+
+@router.get("/clinical_note_section_field_values", tags=["R16 - Procedures"], summary="List procedure section field values reference endpoint")
+async def get_clinical_note_section_field_values(appointment: int = Query(None)):
+    """GET https://app.drchrono.com/api/clinical_note_section_field_values"""
+    return drchrono_get("clinical_note_section_field_values", {"appointment": appointment})
+
+@router.post("/clinical_note_section_field_values", tags=["R16 - Procedures"], summary="Create procedure section field value reference endpoint")
+async def create_clinical_note_section_field_value(payload: Dict[str, Any] = Body(...)):
+    """POST https://app.drchrono.com/api/clinical_note_section_field_values"""
+    return drchrono_post("clinical_note_section_field_values", payload)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # R17 — Care Plan

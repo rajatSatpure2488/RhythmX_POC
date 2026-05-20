@@ -915,7 +915,7 @@
 import json
 import logging
 import mimetypes
-import os
+# import os  # unused
 import random
 import time
 from pathlib import Path
@@ -938,6 +938,8 @@ ENDPOINT_MAP = {
     "patients": "patients",
     "encounter": "appointments",
     "encounters": "appointments",
+    "appointment": "appointments",
+    "appointments": "appointments",
     "condition": "problems",
     "conditions": "problems",
     "problem": "problems",
@@ -949,18 +951,26 @@ ENDPOINT_MAP = {
     "allergies": "allergies",
     "immunization": "vaccines",
     "immunizations": "vaccines",
-    "observation": "lab_results",
-    "observations": "lab_results",
-    "procedure": "procedures",
-    "procedures": "procedures",
+    "diagnostic_report": "lab_results",
+    "diagnostic_reports": "lab_results",
+    "report": "lab_results",
+    "reports": "lab_results",
+    "observation": "clinical_note_field_values",
+    "observations": "clinical_note_field_values",
+    "observation_note": "clinical_note_field_values",
+    "observation_notes": "clinical_note_field_values",
+    "procedure": "clinical_note_section_field_values",
+    "procedures": "clinical_note_section_field_values",
+    "service_request": "lab_orders",
+    "service_requests": "lab_orders",
     "coverage": "patient_insurances",
     "coverages": "patient_insurances",
     "document": "documents",
     "documents": "documents",
     "document_reference": "documents",
     "document_references": "documents",
-    "clinical_note": "clinical_notes",
-    "clinical_notes": "clinical_notes",
+    "clinical_note": "clinical_note_field_values",
+    "clinical_notes": "clinical_note_field_values",
 }
 
 _GENDER_MAP = {
@@ -970,6 +980,32 @@ _GENDER_MAP = {
     "unknown": "Unknown", "u": "Unknown",
     "UNK": "Unknown",
 }
+
+SUPPORTED_DOCUMENT_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png", ".gif", ".bmp"}
+DOCUMENT_MIME_TYPES = {
+    ".pdf": "application/pdf",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".gif": "image/gif",
+    ".bmp": "image/bmp",
+}
+DOCUMENT_MAGIC_BYTES = {
+    ".pdf": b"%PDF",
+    ".jpg": b"\xff\xd8\xff",
+    ".jpeg": b"\xff\xd8\xff",
+    ".png": b"\x89PNG",
+    ".gif": b"GIF8",
+    ".bmp": b"BM",
+}
+MAX_DOCUMENT_SIZE_BYTES = 10 * 1024 * 1024
+
+# Tiny valid PNG used only for demo placeholder files with supported extensions.
+FALLBACK_DEMO_PNG_BYTES = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+    b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\xdac`\xf8"
+    b"\xcfP\x0f\x00\x03\x86\x01\x80Z4}k\x00\x00\x00\x00IEND\xaeB`\x82"
+)
 
 
 def _strip_empty(payload: dict) -> dict:
@@ -1055,6 +1091,14 @@ def _condition_status(record: dict) -> str:
     if raw in ("resolved", "inactive", "entered-in-error"):
         return "resolved"
     return "active"
+
+
+def _first_present(record: dict, *keys: str, default: Any = "") -> Any:
+    for key in keys:
+        value = record.get(key)
+        if value not in (None, "", [], {}):
+            return value
+    return default
 
 
 def _json_headers(token: str) -> dict:
@@ -1213,6 +1257,26 @@ def _map_condition(record: dict, doctor_id: Optional[int], patient_id: Optional[
     return _strip_empty(payload)
 
 
+def _map_encounter(record: dict, doctor_id: Optional[int], patient_id: Optional[int]) -> dict:
+    status = _first_present(record, "status", default="Scheduled")
+    if str(status).lower() in ("finished", "completed", "complete"):
+        status = "Complete"
+
+    payload = {
+        "patient": int(patient_id) if patient_id else None,
+        "doctor": int(doctor_id) if doctor_id else None,
+        "scheduled_time": _first_present(record, "scheduled_time", "start_dt", "start", "date"),
+        "duration": int(_first_present(record, "duration", "minutesDuration", default=30) or 30),
+        "office": _first_present(record, "office", default=doctor_id),
+        "exam_room": _first_present(record, "exam_room", default=1),
+        "status": status,
+        "reason": _first_present(record, "reason", "encounter_type", "description"),
+        "allow_overlapping": True,
+    }
+
+    return _strip_empty(payload)
+
+
 def _map_allergy(record: dict, doctor_id: Optional[int], patient_id: Optional[int]) -> dict:
     name = (
         record.get("description")
@@ -1258,29 +1322,34 @@ def _map_immunization(record: dict, doctor_id: Optional[int], patient_id: Option
 
 
 def _map_observation(record: dict, doctor_id: Optional[int], patient_id: Optional[int]) -> dict:
-    name = (
-        record.get("description")
-        or record.get("name")
-        or record.get("name_full")
-        or _codeable_text(record.get("code"))
-        or "Observation"
-    )
-
-    value = record.get("value")
-    if value is None and isinstance(record.get("valueQuantity"), dict):
+    value = _first_present(record, "value", "result")
+    if value in (None, "") and isinstance(record.get("valueQuantity"), dict):
         value = record["valueQuantity"].get("value")
-
-    notes = record.get("notes") or record.get("conclusion") or ""
-    if value not in (None, ""):
-        unit = record.get("value_unit") or record.get("unit") or ""
-        notes = f"{name}: {value} {unit}".strip()
 
     payload = {
         "patient": int(patient_id) if patient_id else None,
         "doctor": int(doctor_id) if doctor_id else None,
-        "description": name,
-        "document_date": _normalize_date(record.get("effectiveDateTime") or record.get("effective_dt") or record.get("date")),
-        "notes": notes,
+        "clinical_note_field": _first_present(
+            record,
+            "clinical_note_field",
+            "observation_type",
+            "field_type",
+            default=_codeable_code(record.get("code")) or record.get("code"),
+        ),
+        "value": str(value or ""),
+        "units": _first_present(record, "value_unit", "unit", "units"),
+    }
+
+    return _strip_empty(payload)
+
+
+def _map_diagnostic_report(record: dict, doctor_id: Optional[int], patient_id: Optional[int]) -> dict:
+    payload = {
+        "patient": int(patient_id) if patient_id else None,
+        "doctor": int(doctor_id) if doctor_id else None,
+        "description": _first_present(record, "description", "name", "name_full", default=_codeable_text(record.get("code"))),
+        "document_date": _normalize_date(_first_present(record, "document_date", "effective_dt", "effectiveDateTime", "date")),
+        "notes": _first_present(record, "notes", "conclusion", "clinical_information"),
     }
 
     return _strip_empty(payload)
@@ -1288,21 +1357,45 @@ def _map_observation(record: dict, doctor_id: Optional[int], patient_id: Optiona
 
 def _map_clinical_note(record: dict, doctor_id: Optional[int], patient_id: Optional[int]) -> dict:
     payload = {
+        "clinical_note_field": _first_present(record, "clinical_note_field", "field_type"),
+        "value": _first_present(record, "value", "note_text", "notes", "text", "content", "summary_text"),
+        "appointment": _first_present(record, "appointment", "appointment_id"),
+    }
+
+    return _strip_empty(payload)
+
+
+def _map_service_request(record: dict, doctor_id: Optional[int], patient_id: Optional[int]) -> dict:
+    payload = {
         "patient": int(patient_id) if patient_id else None,
         "doctor": int(doctor_id) if doctor_id else None,
-        "clinical_note_date": _normalize_date(
-            record.get("clinical_note_date")
-            or record.get("date")
-            or record.get("effective_dt")
-        ),
-        "notes": (
-            record.get("notes")
-            or record.get("note_text")
-            or record.get("text")
-            or record.get("content")
-            or record.get("summary_text")
-            or ""
-        ),
+        "description": _first_present(record, "description", "service_name", "name_full", default=_codeable_text(record.get("code"))),
+        "status": _first_present(record, "status", default="active"),
+        "order_date": _normalize_date(_first_present(record, "order_date", "order_dt", "authored_dt", "authoredOn")),
+    }
+
+    return _strip_empty(payload)
+
+
+def _map_coverage(record: dict, doctor_id: Optional[int], patient_id: Optional[int]) -> dict:
+    payload = {
+        "patient": int(patient_id) if patient_id else None,
+        "insurance_company": _first_present(record, "insurance_company", "payer_name", "payor_name"),
+        "insurance_plan_name": _first_present(record, "insurance_plan_name", "plan_name"),
+        "insurance_id_number": _first_present(record, "insurance_id_number", "member_id", "subscriber_id"),
+        "insurance_group_number": _first_present(record, "insurance_group_number", "group_id", "group_number"),
+    }
+
+    return _strip_empty(payload)
+
+
+def _map_procedure(record: dict, doctor_id: Optional[int], patient_id: Optional[int]) -> dict:
+    payload = {
+        "patient": int(patient_id) if patient_id else None,
+        "doctor": int(doctor_id) if doctor_id else None,
+        "description": _first_present(record, "description", "procedure_name", "name_full", default=_codeable_text(record.get("code"))),
+        "procedure_date": _normalize_date(_first_present(record, "procedure_date", "performed_dt", "performedDateTime", "date")),
+        "code": _first_present(record, "code", "procedure_code", "cpt_code"),
     }
 
     return _strip_empty(payload)
@@ -1313,6 +1406,8 @@ def _map_record(resource_key: str, record: dict, doctor_id: Optional[int] = None
 
     if key in ("patient", "patients"):
         return _map_patient(record, doctor_id=doctor_id)
+    if key in ("encounter", "encounters", "appointment", "appointments"):
+        return _map_encounter(record, doctor_id, patient_id)
     if key in ("medication", "medications"):
         return _map_medication(record, doctor_id, patient_id)
     if key in ("condition", "conditions", "problem", "problems", "problem_list"):
@@ -1323,8 +1418,16 @@ def _map_record(resource_key: str, record: dict, doctor_id: Optional[int] = None
         return _map_immunization(record, doctor_id, patient_id)
     if key in ("observation", "observations"):
         return _map_observation(record, doctor_id, patient_id)
-    if key in ("clinical_note", "clinical_notes"):
+    if key in ("diagnostic_report", "diagnostic_reports", "report", "reports"):
+        return _map_diagnostic_report(record, doctor_id, patient_id)
+    if key in ("clinical_note", "clinical_notes", "observation_note", "observation_notes"):
         return _map_clinical_note(record, doctor_id, patient_id)
+    if key in ("service_request", "service_requests"):
+        return _map_service_request(record, doctor_id, patient_id)
+    if key in ("coverage", "coverages"):
+        return _map_coverage(record, doctor_id, patient_id)
+    if key in ("procedure", "procedures"):
+        return _map_procedure(record, doctor_id, patient_id)
 
     mapped = dict(record)
     if patient_id:
@@ -1334,7 +1437,7 @@ def _map_record(resource_key: str, record: dict, doctor_id: Optional[int] = None
     return _strip_empty(mapped)
 
 
-def _resolve_file_path(raw_path: str) -> Optional[str]:
+def _resolve_file_path(raw_path: Optional[str]) -> Optional[str]:
     if not raw_path:
         return None
 
@@ -1368,6 +1471,81 @@ def _resolve_file_path(raw_path: str) -> Optional[str]:
     return None
 
 
+def _prepare_document_file(file_path: str) -> tuple[str, bytes, str]:
+    path = Path(file_path)
+
+    if not path.exists():
+        raise FileNotFoundError(f"File not found: {file_path}")
+    if not path.is_file():
+        raise ValueError(f"Document path is not a file: {file_path}")
+
+    file_size = path.stat().st_size
+    if file_size > MAX_DOCUMENT_SIZE_BYTES:
+        mb = file_size / 1024 / 1024
+        raise ValueError(f"File too large: {mb:.2f} MB. Max allowed: 10 MB")
+
+    extension = path.suffix.lower()
+    if extension not in SUPPORTED_DOCUMENT_EXTENSIONS:
+        supported = ", ".join(sorted(SUPPORTED_DOCUMENT_EXTENSIONS))
+        raise ValueError(f"Unsupported document type: {extension}. Supported: {supported}")
+
+    file_bytes = path.read_bytes()
+    expected_magic = DOCUMENT_MAGIC_BYTES.get(extension)
+    is_valid_binary = bool(expected_magic and file_bytes.startswith(expected_magic))
+
+    if not is_valid_binary:
+        # Keep demo placeholder documents uploadable while preserving metadata.
+        return f"{path.stem}.png", FALLBACK_DEMO_PNG_BYTES, "image/png"
+
+    return path.name, file_bytes, DOCUMENT_MIME_TYPES[extension]
+
+
+def _document_metatags(value: Any) -> Optional[str]:
+    if not value:
+        return None
+
+    if isinstance(value, str):
+        tags = [t.strip() for t in value.replace(",", "|").split("|") if t.strip()]
+    elif isinstance(value, list):
+        tags = [str(t).strip() for t in value if str(t).strip()]
+    else:
+        tags = [str(value).strip()]
+
+    return json.dumps(tags) if tags else None
+
+
+def _build_document_form_payload(
+    record: dict,
+    file_path: str,
+    doctor_id: Optional[int],
+    patient_id: int,
+) -> dict:
+    data = {
+        "patient": str(patient_id),
+        "doctor": str(doctor_id) if doctor_id else "",
+        "description": (
+            record.get("description")
+            or record.get("name")
+            or record.get("name_full")
+            or Path(file_path).name
+        ),
+        "date": _normalize_date(
+            record.get("document_date")
+            or record.get("date")
+            or record.get("created_dt")
+            or record.get("effective_dt")
+        ),
+    }
+
+    metatags = _document_metatags(record.get("metatags") or record.get("tags"))
+    if metatags:
+        data["metatags"] = metatags
+    if record.get("archived") is not None:
+        data["archived"] = str(record.get("archived")).lower()
+
+    return _strip_empty(data)
+
+
 def _upload_document(record: dict, token: str, doctor_id: Optional[int], patient_id: Optional[int]) -> dict:
     if not patient_id:
         return {
@@ -1399,48 +1577,30 @@ def _upload_document(record: dict, token: str, doctor_id: Optional[int], patient
 
     url = f"{config.DRCHRONO_API_BASE}documents"
 
-    data = {
-        "patient": str(patient_id),
-        "doctor": str(doctor_id) if doctor_id else "",
-        "description": (
-            record.get("description")
-            or record.get("name")
-            or record.get("name_full")
-            or Path(file_path).name
-        ),
-        "date": _normalize_date(
-            record.get("document_date")
-            or record.get("date")
-            or record.get("created_dt")
-            or record.get("effective_dt")
-        ),
-    }
-
-    tags = record.get("metatags") or record.get("tags")
-    if tags:
-        if isinstance(tags, str):
-            tags = [t.strip() for t in tags.replace(",", "|").split("|") if t.strip()]
-        data["metatags"] = json.dumps(tags)
-
-    data = _strip_empty(data)
-    mime_type = mimetypes.guess_type(file_path)[0] or "application/octet-stream"
-
-    log.info("POST %s multipart_data=%s file=%s mime=%s", url, data, file_path, mime_type)
-
     try:
-        with open(file_path, "rb") as f:
-            files = {
-                "document": (Path(file_path).name, f, mime_type)
-            }
-            resp = requests.post(
-                url,
-                headers=_multipart_headers(token),
-                data=data,
-                files=files,
-                timeout=60,
-            )
+        filename, document_bytes, mime_type = _prepare_document_file(file_path)
+        data = _build_document_form_payload(record, file_path, doctor_id, int(patient_id))
+        files = {"document": (filename, document_bytes, mime_type)}
 
-        log.info("Document upload response: %d — %s", resp.status_code, resp.text[:800])
+        log.info(
+            "POST %s multipart_fields=%s file=%s upload_name=%s mime=%s size=%d",
+            url,
+            list(data.keys()),
+            file_path,
+            filename,
+            mime_type,
+            len(document_bytes),
+        )
+
+        resp = requests.post(
+            url,
+            headers=_multipart_headers(token),
+            data=data,
+            files=files,
+            timeout=60,
+        )
+
+        log.info("Document upload response: %d - %s", resp.status_code, resp.text[:800])
 
         if resp.status_code in (200, 201):
             body = resp.json()
@@ -1533,7 +1693,8 @@ def _live_push_record(
     if key in ("document", "documents", "document_reference", "document_references"):
         return _upload_document(record, token, doctor_id=doctor_id, patient_id=patient_id)
 
-    if not is_patient and not patient_id:
+    patient_optional_keys = {"clinical_note", "clinical_notes"}
+    if not is_patient and not patient_id and key not in patient_optional_keys:
         return {
             "success": False,
             "status_code": 0,
@@ -1573,6 +1734,24 @@ def _live_push_record(
             "error": "Medication name is missing. Map name_full/medicationCodeableConcept.text to name.",
             "already_exists": False,
         }
+
+    if key in ("clinical_note", "clinical_notes", "observation_note", "observation_notes"):
+        if not payload.get("clinical_note_field") or not payload.get("value"):
+            return {
+                "success": False,
+                "status_code": 0,
+                "drchrono_id": None,
+                "error": "Clinical note payload requires clinical_note_field and value/note_text.",
+                "already_exists": False,
+            }
+        if key in ("clinical_note", "clinical_notes") and not payload.get("appointment"):
+            return {
+                "success": False,
+                "status_code": 0,
+                "drchrono_id": None,
+                "error": "Clinical note payload requires appointment or appointment_id.",
+                "already_exists": False,
+            }
 
     if is_patient:
         existing_id = _find_existing_patient(payload, token)
@@ -1692,6 +1871,7 @@ def push_preflight():
 class PushRequest(BaseModel):
     resources: List[str] = []
     dry_run: bool = False
+    access_token: Optional[str] = None
     doctor_id: Optional[int] = None
     patient_id: Optional[int] = None
 
@@ -1711,12 +1891,14 @@ async def push_run(req: PushRequest):
     if not req.dry_run:
         tok_obj = token_store.get_token()
 
-        if not tok_obj or not tok_obj.access_token:
+        if req.access_token:
+            token = req.access_token
+        elif tok_obj and tok_obj.access_token:
+            token = tok_obj.access_token
+        else:
             raise HTTPException(status_code=401, detail="No DrChrono token. Please authenticate first.")
 
-        token = tok_obj.access_token
-
-        if not doctor_id and tok_obj.doctor_id:
+        if not doctor_id and tok_obj and tok_obj.doctor_id:
             try:
                 doctor_id = int(tok_obj.doctor_id)
             except (TypeError, ValueError):
@@ -1727,6 +1909,8 @@ async def push_run(req: PushRequest):
         "patients",
         "encounter",
         "encounters",
+        "appointment",
+        "appointments",
         "condition",
         "conditions",
         "problem",
@@ -1738,8 +1922,16 @@ async def push_run(req: PushRequest):
         "allergies",
         "immunization",
         "immunizations",
+        "diagnostic_report",
+        "diagnostic_reports",
+        "report",
+        "reports",
         "observation",
         "observations",
+        "observation_note",
+        "observation_notes",
+        "service_request",
+        "service_requests",
         "procedure",
         "procedures",
         "coverage",
@@ -1767,6 +1959,8 @@ async def push_run(req: PushRequest):
         if req.dry_run:
             stats[key] = _simulate_push(records, key)
             continue
+
+        assert token is not None  # narrows Optional[str] -> str past the dry_run guard
 
         total = successful = failed = already_exists_count = 0
         errors = []

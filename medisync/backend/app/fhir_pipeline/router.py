@@ -21,7 +21,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.routes.upload import _SESSION
-from app.services import token_store
+from app.services.token_store import token_store
 from app.core import config
 
 from . import push_orchestrator
@@ -215,7 +215,7 @@ async def pipeline_push(req: PushRequest):
     # Get auth token
     if not req.dry_run:
         stored = token_store.get_token()
-        token = stored.get("access_token") if stored else None
+        token = stored.access_token if stored else None
         if not token:
             raise HTTPException(401, "No DrChrono token. Authenticate first via /auth.")
     else:

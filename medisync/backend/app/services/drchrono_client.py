@@ -5,7 +5,7 @@ Handles token exchange, refresh, and user/doctor profile fetching.
 """
 
 import requests
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 from fastapi import HTTPException
 
 from app.core import config
@@ -126,7 +126,7 @@ class DrChronoClient:
         search: Optional[str] = None,
     ):
         """Fetch patient list from DrChrono."""
-        params = {"limit": limit, "offset": offset}
+        params: Dict[str, Any] = {"limit": limit, "offset": offset}
         if search:
             params["search"] = search
 

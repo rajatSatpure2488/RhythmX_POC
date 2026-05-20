@@ -16,6 +16,7 @@ try:
     from app.fhir_pipeline.router import router as pipeline_router
     _PIPELINE_AVAILABLE = True
 except ImportError:
+    pipeline_router = None
     _PIPELINE_AVAILABLE = False
 
 # ── FHIR R5 Integration (independent module — delete this block to remove) ──
@@ -23,6 +24,7 @@ try:
     from app.fhir_r5.router import router as fhir_r5_router
     _FHIR_R5_AVAILABLE = True
 except ImportError:
+    fhir_r5_router = None
     _FHIR_R5_AVAILABLE = False
 
 # ── Rule-Based Mapper (FHIR R5 → DrChrono — delete this block to remove) ──
@@ -30,6 +32,7 @@ try:
     from app.mappers.router import router as mapper_router
     _MAPPER_AVAILABLE = True
 except ImportError:
+    mapper_router = None
     _MAPPER_AVAILABLE = False
 
 app = FastAPI(
@@ -69,15 +72,15 @@ app.include_router(drchrono.router,   prefix="/drchrono", tags=["DrChrono Resour
 app.include_router(fhir_proxy.router, prefix="/fhir-proxy", tags=["FHIR Proxy"])
 
 # ── FHIR Pipeline (independent — remove this line to disconnect) ──
-if _PIPELINE_AVAILABLE:
+if _PIPELINE_AVAILABLE and pipeline_router is not None:
     app.include_router(pipeline_router, prefix="/pipeline", tags=["FHIR Pipeline"])
 
 # ── FHIR R5 (independent — remove this line to disconnect) ──
-if _FHIR_R5_AVAILABLE:
+if _FHIR_R5_AVAILABLE and fhir_r5_router is not None:
     app.include_router(fhir_r5_router, prefix="/fhir-r5", tags=["FHIR R5"])
 
 # ── Rule-Based Mapper (independent — remove this line to disconnect) ──
-if _MAPPER_AVAILABLE:
+if _MAPPER_AVAILABLE and mapper_router is not None:
     app.include_router(mapper_router, prefix="/mapper", tags=["Mapper"])
 
 @app.on_event("startup")

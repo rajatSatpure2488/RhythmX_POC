@@ -52,7 +52,17 @@ export function AuthProvider({ children }) {
   const [auth, setAuthState] = useState(() => {
     clearLegacyStorage()         // remove stale localStorage on every boot
     const saved = loadSession()  // only restore if same-tab OAuth redirect
-    return saved ? { ...INITIAL, ...saved } : INITIAL
+
+    // If we're landing on an OAuth callback URL (?code=...), start in
+    // 'connecting' state so Dashboard renders the spinner immediately
+    // instead of briefly showing AuthGate before the useEffect kicks in.
+    let override = {}
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search)
+      if (params.get('code')) override = { status: 'connecting' }
+    }
+
+    return { ...INITIAL, ...(saved || {}), ...override }
   })
 
   const setAuth = useCallback((updater) => {

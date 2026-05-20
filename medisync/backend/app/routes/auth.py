@@ -84,6 +84,9 @@ def oauth_exchange(req: ExchangeRequest):
     refresh_token = token_data.get("refresh_token")
     expires_in    = token_data.get("expires_in", 172800)
 
+    if not access_token:
+        raise HTTPException(status_code=400, detail="DrChrono did not return an access_token")
+
     # 2. Fetch doctor profile
     doctor_name = None
     doctor_id   = None
@@ -175,6 +178,7 @@ def auth_status():
         return AuthStatusResponse(connected=False)
 
     token = token_store.get_token()
+    assert token is not None  # narrows after is_valid()
     return AuthStatusResponse(
         connected=True,
         doctor_id=token.doctor_id,
@@ -191,8 +195,9 @@ def auth_token():
     """Return the raw access token for testing in external tools."""
     if not token_store.is_valid():
         raise HTTPException(status_code=401, detail="No active token found in memory. Please authenticate via the UI first.")
-    
+
     token = token_store.get_token()
+    assert token is not None  # narrows after is_valid()
     return {
         "access_token": token.access_token,
         "doctor_id": token.doctor_id,
@@ -214,8 +219,12 @@ def auth_refresh():
 
     token_data = drchrono_client.refresh_token(token.refresh_token)
 
+    new_access = token_data.get("access_token")
+    if not new_access:
+        raise HTTPException(status_code=401, detail="DrChrono refresh did not return an access_token")
+
     token_store.set_token(
-        access_token=token_data.get("access_token"),
+        access_token=new_access,
         expires_in=token_data.get("expires_in", 172800),
         refresh_token=token_data.get("refresh_token", token.refresh_token),
         doctor_id=token.doctor_id,

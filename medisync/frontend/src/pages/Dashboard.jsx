@@ -21,26 +21,17 @@ const STAGE_TITLES = {
 }
 
 const PIPELINE_KEY = 'medisync_pipeline'
-const AUTH_SESSION = 'medisync_auth_session'
 
+// Pipeline progress is NOT persisted across reloads / logins, because the
+// dataset (DatasetContext) is in-memory only. Showing completed-stage check
+// marks without underlying data is misleading. Always boot fresh.
 function loadPipeline() {
-  try {
-    // If auth session is gone (fresh restart), clear pipeline too
-    const authRaw = sessionStorage.getItem(AUTH_SESSION)
-    if (!authRaw) {
-      sessionStorage.removeItem(PIPELINE_KEY)
-      return { activeStage: 'auth', completedStages: [] }
-    }
-    const raw = sessionStorage.getItem(PIPELINE_KEY)
-    if (raw) return JSON.parse(raw)
-  } catch { /* ignore */ }
+  try { sessionStorage.removeItem(PIPELINE_KEY) } catch { /* ignore */ }
   return { activeStage: 'auth', completedStages: [] }
 }
 
-function savePipeline(activeStage, completedStages) {
-  try {
-    sessionStorage.setItem(PIPELINE_KEY, JSON.stringify({ activeStage, completedStages }))
-  } catch { /* ignore */ }
+function savePipeline(_activeStage, _completedStages) {
+  // No-op: pipeline state is ephemeral. See loadPipeline() for rationale.
 }
 
 export default function Dashboard() {

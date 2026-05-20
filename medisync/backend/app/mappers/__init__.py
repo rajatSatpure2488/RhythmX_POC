@@ -10,7 +10,7 @@ Usage:
     result = mapper.transform(fhir_resource, context={"doctor_id": 1234})
 """
 from __future__ import annotations
-from typing import Optional
+from typing import Any, Optional
 
 from .base_mapper import BaseRuleMapper, MapperResult
 from .patient_mapper import PatientMapper
@@ -60,7 +60,7 @@ def get_mapper(resource_type: str) -> Optional[BaseRuleMapper]:
     return MAPPER_REGISTRY.get(resource_type)
 
 
-def list_supported() -> list[dict[str, str]]:
+def list_supported() -> list[dict[str, Any]]:
     """List all supported resource types and their DrChrono endpoints."""
     return [
         {
