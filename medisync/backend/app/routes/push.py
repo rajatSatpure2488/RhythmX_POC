@@ -915,20 +915,20 @@
 import json
 import logging
 import mimetypes
-# import os  # unused
+import os
 import random
 import time
 from pathlib import Path
 from typing import Any, List, Optional
 
 import requests
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, File, Form, UploadFile
 from pydantic import BaseModel
 
 from app.core import config
 from app.routes.upload import _SESSION
 from app.services.token_store import token_store
-
+from app.services.drchrono_proxy import drchrono_post_document
 log = logging.getLogger("medisync.push")
 
 router = APIRouter()
@@ -1081,16 +1081,22 @@ def _active_status(value: Any, default: str = "active") -> str:
 
 
 def _condition_status(record: dict) -> str:
+    """DrChrono /problems status field must be capitalized: 'Active' or 'Resolved'."""
     clinical = record.get("clinicalStatus")
     if isinstance(clinical, dict):
         text = _codeable_text(clinical).lower()
         if "resolved" in text or "inactive" in text:
-            return "resolved"
+            return "Resolved"
 
-    raw = str(record.get("status") or record.get("verificationStatus") or "active").lower()
-    if raw in ("resolved", "inactive", "entered-in-error"):
-        return "resolved"
-    return "active"
+    raw = str(
+        record.get("status")
+        or record.get("verificationStatus")
+        or record.get("clinical_status")
+        or "active"
+    ).lower()
+    if raw in ("resolved", "inactive", "entered-in-error", "remission"):
+        return "Resolved"
+    return "Active"
 
 
 def _first_present(record: dict, *keys: str, default: Any = "") -> Any:
@@ -1225,11 +1231,17 @@ def _map_medication(record: dict, doctor_id: Optional[int], patient_id: Optional
 
 
 def _map_condition(record: dict, doctor_id: Optional[int], patient_id: Optional[int]) -> dict:
+    """
+    Map to DrChrono /problems.
+    Required: patient, doctor, description
+    Optional: icd_code (string, e.g. 'Z87.39'), date_onset (YYYY-MM-DD), status ('Active'/'Resolved')
+    """
     name = (
         record.get("description")
         or record.get("name")
         or record.get("name_full")
         or _codeable_text(record.get("code"))
+        or record.get("condition_name")
         or ""
     )
 
@@ -1240,39 +1252,100 @@ def _map_condition(record: dict, doctor_id: Optional[int], patient_id: Optional[
         "status": _condition_status(record),
     }
 
+    # Fixed: operator precedence bug in original — evaluate icd_code unconditionally
     icd_code = (
         record.get("icd_code")
         or record.get("code_value")
-        or record.get("code")
-        if isinstance(record.get("code"), str)
-        else _codeable_code(record.get("code"))
+        or record.get("icd")
+        or (record.get("code") if isinstance(record.get("code"), str) else None)
+        or _codeable_code(record.get("code"))
     )
     if icd_code:
-        payload["icd_code"] = str(icd_code)
+        payload["icd_code"] = str(icd_code).strip()
 
-    onset = record.get("date_onset") or record.get("onsetDateTime") or record.get("start_dt")
+    onset = (
+        record.get("date_onset")
+        or record.get("onsetDateTime")
+        or record.get("start_dt")
+        or record.get("onset_date")
+        or record.get("diagnosis_date")
+    )
     if onset:
         payload["date_onset"] = _normalize_date(onset)
+
+    notes = record.get("notes") or record.get("comment") or record.get("clinical_notes")
+    if notes:
+        payload["notes"] = str(notes)
 
     return _strip_empty(payload)
 
 
+def _normalize_datetime(val: Any) -> str:
+    """Ensure ISO-8601 datetime for DrChrono scheduled_time: YYYY-MM-DDTHH:MM:SS."""
+    if not val:
+        return ""
+    s = str(val).strip()
+    # Already has time component
+    if "T" in s:
+        # Truncate timezone/microseconds: keep YYYY-MM-DDTHH:MM:SS
+        return s[:19]
+    # Date only — append midnight
+    if len(s) >= 10:
+        return s[:10] + "T09:00:00"
+    return s
+
+
 def _map_encounter(record: dict, doctor_id: Optional[int], patient_id: Optional[int]) -> dict:
-    status = _first_present(record, "status", default="Scheduled")
-    if str(status).lower() in ("finished", "completed", "complete"):
+    """
+    Map to DrChrono /appointments.
+    Required: patient, doctor, scheduled_time (ISO-8601), duration (minutes)
+    Note: 'office' must be a DrChrono office/location ID — we omit it and let DrChrono use
+          the doctor's default office rather than incorrectly setting it to doctor_id.
+    """
+    status_raw = str(_first_present(record, "status", default="Scheduled")).lower()
+    if status_raw in ("finished", "completed", "complete", "arrived"):
         status = "Complete"
+    elif status_raw in ("cancelled", "canceled", "noshow", "no-show", "no_show"):
+        status = "Cancelled"
+    elif status_raw in ("in_session", "in session"):
+        status = "In Session"
+    else:
+        status = "Scheduled"
+
+    raw_time = _first_present(
+        record,
+        "scheduled_time", "start_dt", "start", "date",
+        "appointment_date", "encounter_date", "visit_date",
+    )
+    scheduled_time = _normalize_datetime(raw_time)
+
+    duration = 30
+    try:
+        duration = int(_first_present(record, "duration", "minutesDuration", "length_minutes", default=30) or 30)
+    except (ValueError, TypeError):
+        pass
 
     payload = {
         "patient": int(patient_id) if patient_id else None,
         "doctor": int(doctor_id) if doctor_id else None,
-        "scheduled_time": _first_present(record, "scheduled_time", "start_dt", "start", "date"),
-        "duration": int(_first_present(record, "duration", "minutesDuration", default=30) or 30),
-        "office": _first_present(record, "office", default=doctor_id),
-        "exam_room": _first_present(record, "exam_room", default=1),
+        "scheduled_time": scheduled_time,
+        "duration": duration,
         "status": status,
-        "reason": _first_present(record, "reason", "encounter_type", "description"),
+        "reason": _first_present(record, "reason", "encounter_type", "description", "chief_complaint"),
         "allow_overlapping": True,
     }
+
+    # Only set office if explicitly provided as an integer office ID (not doctor_id)
+    office_id = _first_present(record, "office", "office_id", "location_id")
+    if office_id and str(office_id).isdigit():
+        payload["office"] = int(office_id)
+
+    exam_room = _first_present(record, "exam_room", "room")
+    if exam_room:
+        try:
+            payload["exam_room"] = int(exam_room)
+        except (ValueError, TypeError):
+            pass
 
     return _strip_empty(payload)
 
@@ -1437,38 +1510,63 @@ def _map_record(resource_key: str, record: dict, doctor_id: Optional[int] = None
     return _strip_empty(mapped)
 
 
+
+
 def _resolve_file_path(raw_path: Optional[str]) -> Optional[str]:
+    """
+    Resolve a document file path, searching in multiple locations.
+
+    Mirrors the reference upload_document_to_drchrono() pattern:
+      path = Path(file_path).expanduser().resolve()
+
+    For relative paths, searches:
+      1. CWD-relative  (where the uvicorn/server process was launched)
+      2. Every ancestor directory up from the backend, looking for the relative path
+      3. DOCUMENT_SEARCH_ROOT env var if set
+    """
     if not raw_path:
         return None
 
     p = Path(str(raw_path)).expanduser()
 
-    candidates = []
+    # Absolute path — test directly (same as reference code)
     if p.is_absolute():
-        candidates.append(p)
-    else:
-        candidates.append(Path.cwd() / p)
+        resolved = p.resolve()
+        return str(resolved) if resolved.exists() and resolved.is_file() else None
 
-        base_dir = getattr(config, "BASE_DIR", None)
-        if base_dir:
-            candidates.append(Path(base_dir) / p)
+    # Relative path — build candidate list
+    candidates: list[Path] = []
 
-        upload_dir = getattr(config, "UPLOAD_DIR", None)
-        if upload_dir:
-            candidates.append(Path(upload_dir) / p)
+    # 1. CWD-relative (this is how the reference script works)
+    candidates.append(Path.cwd() / p)
 
-        project_root = Path(__file__).resolve().parents[2]
-        candidates.append(project_root / p)
+    # 2. Walk up from this file's location all the way to the filesystem root
+    #    This catches Dataset/ placed anywhere in the ancestor tree
+    here = Path(__file__).resolve().parent
+    while True:
+        candidates.append(here / p)
+        parent = here.parent
+        if parent == here:   # reached fs root
+            break
+        here = parent
+
+    # 3. Explicit override from env (set DOCUMENT_SEARCH_ROOT=/path/to/dir)
+    search_root = os.environ.get("DOCUMENT_SEARCH_ROOT", "")
+    if search_root:
+        candidates.append(Path(search_root) / p)
 
     for candidate in candidates:
         try:
             resolved = candidate.resolve()
             if resolved.exists() and resolved.is_file():
+                log.debug("_resolve_file_path: resolved '%s' → '%s'", raw_path, resolved)
                 return str(resolved)
         except Exception:
             continue
 
+    log.warning("_resolve_file_path: could not find '%s' in any candidate location", raw_path)
     return None
+
 
 
 def _prepare_document_file(file_path: str) -> tuple[str, bytes, str]:
@@ -1494,13 +1592,26 @@ def _prepare_document_file(file_path: str) -> tuple[str, bytes, str]:
     is_valid_binary = bool(expected_magic and file_bytes.startswith(expected_magic))
 
     if not is_valid_binary:
-        # Keep demo placeholder documents uploadable while preserving metadata.
-        return f"{path.stem}.png", FALLBACK_DEMO_PNG_BYTES, "image/png"
+        # If magic bytes don't match, log a warning but still try uploading —
+        # DrChrono may accept the file if the content-type header is correct.
+        # Only fall back to demo PNG for truly unreadable files.
+        log.warning(
+            "_prepare_document_file: magic bytes mismatch for %s (ext=%s) — "
+            "uploading as-is with declared MIME type",
+            path.name, extension,
+        )
+        # Still send the real bytes with the declared MIME type — let DrChrono decide
+        mime = DOCUMENT_MIME_TYPES.get(extension, "application/octet-stream")
+        return path.name, file_bytes, mime
 
     return path.name, file_bytes, DOCUMENT_MIME_TYPES[extension]
 
 
 def _document_metatags(value: Any) -> Optional[str]:
+    """
+    DrChrono accepts metatags as a pipe-separated string: 'lab|cbc|uploaded'
+    NOT as JSON. Fixed from json.dumps() to '|'.join().
+    """
     if not value:
         return None
 
@@ -1511,7 +1622,12 @@ def _document_metatags(value: Any) -> Optional[str]:
     else:
         tags = [str(value).strip()]
 
-    return json.dumps(tags) if tags else None
+    return "|".join(tags) if tags else None
+
+
+def _today_date() -> str:
+    from datetime import date
+    return date.today().isoformat()
 
 
 def _build_document_form_payload(
@@ -1520,30 +1636,49 @@ def _build_document_form_payload(
     doctor_id: Optional[int],
     patient_id: int,
 ) -> dict:
-    data = {
+    """
+    Build the multipart form fields for DrChrono POST /documents.
+    Required fields: patient, doctor, description, date, document (file)
+    """
+    description = (
+        record.get("description")
+        or record.get("name")
+        or record.get("name_full")
+        or record.get("document_type")
+        or Path(file_path).stem
+    )
+
+    # date is REQUIRED by DrChrono — always emit a valid date
+    doc_date = _normalize_date(
+        record.get("document_date")
+        or record.get("date")
+        or record.get("created_dt")
+        or record.get("effective_dt")
+        or record.get("report_date")
+    ) or _today_date()
+
+    data: dict = {
         "patient": str(patient_id),
-        "doctor": str(doctor_id) if doctor_id else "",
-        "description": (
-            record.get("description")
-            or record.get("name")
-            or record.get("name_full")
-            or Path(file_path).name
-        ),
-        "date": _normalize_date(
-            record.get("document_date")
-            or record.get("date")
-            or record.get("created_dt")
-            or record.get("effective_dt")
-        ),
+        "description": description,
+        "date": doc_date,
     }
 
-    metatags = _document_metatags(record.get("metatags") or record.get("tags"))
+    # doctor is required for documents
+    if doctor_id:
+        data["doctor"] = str(doctor_id)
+
+    metatags = _document_metatags(
+        record.get("metatags")
+        or record.get("tags")
+        or record.get("document_type")
+    )
     if metatags:
         data["metatags"] = metatags
-    if record.get("archived") is not None:
-        data["archived"] = str(record.get("archived")).lower()
 
-    return _strip_empty(data)
+    if record.get("archived") is not None:
+        data["archived"] = str(bool(record.get("archived"))).lower()
+
+    return {k: v for k, v in data.items() if v not in (None, "")}
 
 
 def _upload_document(record: dict, token: str, doctor_id: Optional[int], patient_id: Optional[int]) -> dict:
@@ -2016,3 +2151,77 @@ async def push_run(req: PushRequest):
         "patient_id": current_patient_id,
         "stats": stats,
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Document File Upload — direct file push (mirrors reference integration pattern)
+# ═══════════════════════════════════════════════════════════════════════════════
+@router.post(
+    "/documents/file",
+    tags=["Push"],
+    summary="Direct document file upload to DrChrono",
+)
+async def push_document_file(
+    patient_id:  int        = Form(...,  description="DrChrono patient ID"),
+    doctor_id:   int        = Form(...,  description="DrChrono doctor ID"),
+    description: str        = Form(...,  description="Human-readable document label"),
+    date:        str        = Form(...,  description="Document date (YYYY-MM-DD)"),
+    file:        UploadFile = File(...,  description="PDF or image file (max 10 MB)"),
+    metatags:    str        = Form("",   description="Tags — comma or pipe separated, e.g. lab|cbc"),
+    archived:    bool       = Form(False, description="Archive document immediately after upload"),
+):
+    """
+    Upload a document file directly to DrChrono — no session required.
+
+    Mirrors the reference `upload_document_to_drchrono()` pattern:
+    - Validates file extension (.pdf / .jpg / .jpeg / .png / .gif / .bmp)
+    - Checks file size (≤ 10 MB)
+    - Verifies binary magic bytes match the declared extension
+    - Posts multipart/form-data to DrChrono /api/documents
+
+    Returns the DrChrono document object on success (includes `id` field).
+    """
+    filename  = file.filename or "document.pdf"
+    extension = ("." + filename.rsplit(".", 1)[-1].lower()) if "." in filename else ""
+
+    if extension not in SUPPORTED_DOCUMENT_EXTENSIONS:
+        raise HTTPException(
+            400,
+            f"Unsupported file type '{extension}'. "
+            f"Supported: {', '.join(sorted(SUPPORTED_DOCUMENT_EXTENSIONS))}",
+        )
+
+    file_bytes = await file.read()
+
+    if len(file_bytes) > MAX_DOCUMENT_SIZE_BYTES:
+        raise HTTPException(
+            400,
+            f"File too large: {len(file_bytes)/1024/1024:.2f} MB. Max allowed: 10 MB.",
+        )
+
+    expected_magic = DOCUMENT_MAGIC_BYTES.get(extension)
+    if expected_magic and not file_bytes.startswith(expected_magic):
+        raise HTTPException(
+            400,
+            f"File extension is '{extension}' but binary content does not match. "
+            "Upload a real file, not a renamed one.",
+        )
+
+    mime_type = DOCUMENT_MIME_TYPES.get(extension, "application/octet-stream")
+
+    log.info(
+        "push_document_file: patient=%d doctor=%d filename=%s size=%d mime=%s",
+        patient_id, doctor_id, filename, len(file_bytes), mime_type,
+    )
+
+    return drchrono_post_document(
+        patient=patient_id,
+        doctor=doctor_id,
+        description=description.strip(),
+        date=date[:10],
+        document_bytes=file_bytes,
+        filename=filename,
+        mime_type=mime_type,
+        metatags=metatags,
+        archived=archived,
+    )

@@ -41,7 +41,7 @@ def _handshake_str() -> str:
 def auth_debug():
     """Returns sanitized config state — use to diagnose CLIENT_ID missing errors."""
     from pathlib import Path
-    env_path = Path(config.__file__).resolve().parents[3] / ".env"
+    env_path = Path(config.__file__).resolve().parents[2] / ".env"
     return {
         "env_file_path":         str(env_path),
         "env_file_exists":       env_path.exists(),

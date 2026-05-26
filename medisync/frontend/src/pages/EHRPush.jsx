@@ -3,7 +3,7 @@ import { useDataset } from '../context/DatasetContext'
 import { useApiRate } from '../context/ApiRateContext'
 import { useAuth } from '../context/AuthContext'
 import { ApiPrePushBot, ApiPostPushBot } from '../components/ApiMonitorBot'
-import api from '../services/api'   // ← shared axios client with Vite proxy baseURL
+import api from '../services/api'
 
 const TAB_LABELS = {
   medications:'Medications', medication:'Medications', conditions:'Conditions', condition:'Conditions',
@@ -37,8 +37,6 @@ const DRCHRONO_ENDPOINTS = {
   clinical_notes:       'POST /api/clinical_notes',
   coverages:            'POST /api/patient_insurances',
 }
-
-
 
 function LogEntry({ entry }) {
   const [open, setOpen] = useState(false)
@@ -113,14 +111,13 @@ function LogEntry({ entry }) {
 export default function EHRPush() {
   const { dataset, addPushLogEntry, setPushSummary, clearPushLog } = useDataset()
   const { resources, pushLog, pushSummary, validationResults } = dataset
-  const { auth } = useAuth()   // ← get doctor_id from auth context
+  const { auth } = useAuth()
 
   const availableKeys = Object.entries(resources || {})
     .filter(([, v]) => Array.isArray(v) && v.length > 0)
     .map(([k]) => k)
 
   const [selected, setSelected] = useState(() => {
-    // Pre-select resources that passed validation (rate >= 80%)
     const vd = validationResults?.details || {}
     return availableKeys.reduce((acc, k) => {
       acc[k] = vd[k] ? vd[k].rate >= 80 : true
@@ -155,7 +152,6 @@ export default function EHRPush() {
     const selectedKeys = availableKeys.filter(k => selected[k])
 
     try {
-      // ── Guard: block push in dev mode (no real token) ────────
       if (auth.devMode) {
         for (const key of selectedKeys) {
           addPushLogEntry({
@@ -173,9 +169,6 @@ export default function EHRPush() {
         return
       }
 
-      // ── Real push to DrChrono via backend ────────────────────
-      // Pass doctor_id from auth context so the backend doesn't
-      // need to guess it solely from the token store.
       const doctorId = auth.doctorId ? parseInt(auth.doctorId, 10) : undefined
       const resp = await api.post('/push/run', {
         resources: selectedKeys,
@@ -186,14 +179,12 @@ export default function EHRPush() {
       const data = resp.data
       const ts = new Date().toLocaleTimeString('en-US', { hour:'2-digit', minute:'2-digit', second:'2-digit' })
 
-      // Build push log entries from backend stats
       for (const key of selectedKeys) {
         const stat = data.stats?.[key]
         if (!stat) continue
         const endpoint = DRCHRONO_ENDPOINTS[key] || `POST /api/${key}`
         const recs = resources[key] || []
 
-        // Log successful records (newly created)
         for (let i = 0; i < (stat.successful || 0); i++) {
           const isExisting = i < (stat.already_exists || 0)
           const rec = recs[i] || {}
@@ -213,7 +204,6 @@ export default function EHRPush() {
           recordCall()
         }
 
-        // Log failed records
         const errs = stat.errors || []
         for (let i = 0; i < (stat.failed || 0); i++) {
           const rec = recs[(stat.successful || 0) + i] || {}
@@ -241,7 +231,6 @@ export default function EHRPush() {
       })
 
     } catch (err) {
-      // err.httpStatus is set by api.js interceptor — preserves real HTTP status
       const status = err.httpStatus ?? err.response?.status ?? 0
       const detail = err.message || 'Unknown error'
       const ts = new Date().toLocaleTimeString('en-US', { hour:'2-digit', minute:'2-digit', second:'2-digit' })
@@ -274,10 +263,12 @@ export default function EHRPush() {
   }
 
   const vd = validationResults?.details || {}
+  const failedEntries = pushLog.filter(e => !e.success)
 
   return (
     <div className="push-select-page">
-      {/* Header */}
+
+      {/* ── Header ─────────────────────────────────────── */}
       <div className="push-select-header">
         <div>
           <h1 className="stage-header__title" style={{ marginBottom: 4 }}>Select Resources to Push</h1>
@@ -294,122 +285,162 @@ export default function EHRPush() {
         </div>
       </div>
 
-      {/* Resource Cards */}
-      {availableKeys.length === 0 ? (
-        <div className="validation-idle-card">
-          <div style={{ fontSize: '2rem', marginBottom: 12 }}>📭</div>
-          <p style={{ color: 'var(--text-muted)' }}>No dataset loaded. Upload files in Ingestion first.</p>
-        </div>
-      ) : (
-        <div className="resource-card-grid">
-          {availableKeys.map(k => {
-            const on      = !!selected[k]
-            const count   = (resources[k] || []).length
-            const vdKey   = vd[k]
-            const rate    = vdKey?.rate
-            const rateColor = !rate ? '#9CA3AF' : rate >= 80 ? '#16a34a' : rate >= 50 ? '#d97706' : '#dc2626'
-            return (
-              <div
-                key={k}
-                className={`resource-push-card ${on ? 'resource-push-card--on' : ''}`}
-                onClick={() => toggle(k)}
-              >
-                <div className="resource-push-card__top">
-                  <div className="resource-push-card__icon-wrap">
-                    <span style={{ fontSize: '1.3rem' }}>{ICONS[k] || ICONS.default}</span>
-                  </div>
-                  <div className="resource-push-card__info">
-                    <div className="resource-push-card__name">{TAB_LABELS[k] || k}</div>
-                    <div className="resource-push-card__count">{count} records</div>
-                  </div>
-                  <button
-                    className={`resource-toggle ${on ? 'resource-toggle--on' : ''}`}
-                    onClick={e => { e.stopPropagation(); toggle(k) }}
+      {/* ── Two-column body ─────────────────────────────── */}
+      <div className="push-two-col">
+
+        {/* LEFT — Resource selection + AI bots */}
+        <div className="push-left-col">
+          {availableKeys.length === 0 ? (
+            <div className="validation-idle-card">
+              <div style={{ fontSize: '2rem', marginBottom: 12 }}>📭</div>
+              <p style={{ color: 'var(--text-muted)' }}>No dataset loaded. Upload files in Ingestion first.</p>
+            </div>
+          ) : (
+            <div className="resource-card-grid">
+              {availableKeys.map(k => {
+                const on      = !!selected[k]
+                const count   = (resources[k] || []).length
+                const vdKey   = vd[k]
+                const rate    = vdKey?.rate
+                const rateColor = !rate ? '#9CA3AF' : rate >= 80 ? '#16a34a' : rate >= 50 ? '#d97706' : '#dc2626'
+                return (
+                  <div
+                    key={k}
+                    className={`resource-push-card ${on ? 'resource-push-card--on' : ''}`}
+                    onClick={() => toggle(k)}
                   >
-                    <span className="resource-toggle__thumb" />
-                  </button>
-                </div>
-                {rate !== undefined && (
-                  <div className="resource-push-card__tag" style={{ color: rateColor }}>
-                    {rate >= 80 ? '✓' : '⚠'} {rate}% validation pass rate
-                    {vdKey?.failed > 0 && ` · ${vdKey.failed} errors`}
+                    <div className="resource-push-card__top">
+                      <div className="resource-push-card__icon-wrap">
+                        <span style={{ fontSize: '1.3rem' }}>{ICONS[k] || ICONS.default}</span>
+                      </div>
+                      <div className="resource-push-card__info">
+                        <div className="resource-push-card__name">{TAB_LABELS[k] || k}</div>
+                        <div className="resource-push-card__count">{count} records</div>
+                      </div>
+                      <button
+                        className={`resource-toggle ${on ? 'resource-toggle--on' : ''}`}
+                        onClick={e => { e.stopPropagation(); toggle(k) }}
+                      >
+                        <span className="resource-toggle__thumb" />
+                      </button>
+                    </div>
+                    {rate !== undefined && (
+                      <div className="resource-push-card__tag" style={{ color: rateColor }}>
+                        {rate >= 80 ? '✓' : '⚠'} {rate}% validation pass rate
+                        {vdKey?.failed > 0 && ` · ${vdKey.failed} errors`}
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-            )
-          })}
+                )
+              })}
+            </div>
+          )}
+
+          {/* AI Pre-Push Analysis */}
+          <ApiPrePushBot
+            validationDetails={vd}
+            selected={selected}
+            resources={resources}
+          />
+
+          {/* AI Post-Push Failure Analysis */}
+          <ApiPostPushBot pushLog={pushLog} pushSummary={pushSummary} />
         </div>
-      )}
 
-      {/* AI Pre-Push Analysis */}
-      <ApiPrePushBot
-        validationDetails={vd}
-        selected={selected}
-        resources={resources}
-      />
+        {/* RIGHT — Sticky Push Log panel */}
+        <div className="push-right-col">
+          <div className="push-log-panel">
+            {/* Panel header */}
+            <div className="push-log-panel__header">
+              <span className="push-log-title">
+                {pushing
+                  ? <><span className="btn-spinner" style={{ width: 10, height: 10, borderWidth: 2 }} /> Live Push Log</>
+                  : '📋 Push Log'}
+              </span>
+              {pushSummary && (
+                <div className="push-log-summary" style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 12px', marginTop: 6 }}>
+                  <span style={{ color: '#16a34a', fontWeight: 600 }}>✓ {pushSummary.successful} passed</span>
+                  {pushSummary.already_exists > 0 && (
+                    <span style={{ color: '#d97706', fontWeight: 600 }}>⟳ {pushSummary.already_exists} existed</span>
+                  )}
+                  <span style={{ color: '#dc2626', fontWeight: 600 }}>✗ {pushSummary.failed} failed</span>
+                  <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem', alignSelf: 'center' }}>
+                    of {pushSummary.total} total
+                  </span>
+                </div>
+              )}
+              {!pushSummary && !pushing && (
+                <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                  Push results will appear here
+                </span>
+              )}
+            </div>
 
-      {/* Real-time Push Log */}
-      {(pushLog.length > 0 || pushing) && (
-        <div className="push-log-section">
-          <div className="push-log-header">
-            <span className="push-log-title">
-              {pushing ? <><span className="btn-spinner" style={{ width: 10, height: 10, borderWidth: 2 }} /> Live Push Log</> : '📋 Push Log'}
-            </span>
-            {pushSummary && (
-              <div className="push-log-summary">
-                <span style={{ color: '#16a34a' }}>✓ {pushSummary.successful} passed</span>
-                {pushSummary.already_exists > 0 && (
-                  <span style={{ color: '#d97706', marginLeft: 12 }}>⟳ {pushSummary.already_exists} already existed</span>
-                )}
-                <span style={{ color: '#dc2626', marginLeft: 12 }}>✗ {pushSummary.failed} failed</span>
-                <span style={{ color: 'var(--text-muted)', marginLeft: 12, fontSize: '0.7rem' }}>of {pushSummary.total} total</span>
+            {/* Progress bar */}
+            {pushing && (
+              <div className="push-log-progress">
+                <div className="push-log-progress__fill" style={{ width: `${Math.round((pushLog.length / Math.max(totalSel, 1)) * 100)}%` }} />
+              </div>
+            )}
+
+            {/* Empty state */}
+            {pushLog.length === 0 && !pushing && (
+              <div className="push-log-empty">
+                <div style={{ fontSize: '2rem', marginBottom: 8 }}>📡</div>
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textAlign: 'center', lineHeight: 1.6 }}>
+                  No push activity yet.<br />
+                  Select resources and click <strong>Push Selected Data</strong>.
+                </div>
+              </div>
+            )}
+
+            {/* Log entries — scrollable */}
+            {pushLog.length > 0 && (
+              <div className="push-log-body" ref={logRef}>
+                {pushLog.map((entry, i) => <LogEntry key={i} entry={entry} />)}
+              </div>
+            )}
+
+            {/* Failed records debug table */}
+            {done && failedEntries.length > 0 && (
+              <div className="push-log-fail-table">
+                <div className="vld-debug-table-header">
+                  <span className="vld-debug-table-title">
+                    ⚠ {failedEntries.length} Failed — click a row above for details
+                  </span>
+                  <button className="btn btn--ghost btn--sm" onClick={handlePush}>↺ Retry</button>
+                </div>
+                <div style={{ overflowX: 'auto' }}>
+                  <table className="vld-debug-table">
+                    <thead>
+                      <tr>
+                        <th>RECORD ID</th>
+                        <th>RESOURCE</th>
+                        <th>HTTP</th>
+                        <th>ERROR</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {failedEntries.map((e, i) => (
+                        <tr key={i}>
+                          <td className="vld-record-id">{e.recordId}</td>
+                          <td>{TAB_LABELS[e.resource] || e.resource}</td>
+                          <td><span className="err-tag err-tag--null">{e.httpStatus}</span></td>
+                          <td className="vld-debug-detail" style={{ maxWidth: 200, wordBreak: 'break-word' }}>
+                            {e.error} — {e.detail}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
           </div>
-
-          {/* Progress bar while pushing */}
-          {pushing && (
-            <div className="push-log-progress">
-              <div className="push-log-progress__fill" style={{ width: `${Math.round((pushLog.length / totalSel) * 100)}%` }} />
-            </div>
-          )}
-
-          <div className="push-log-body" ref={logRef}>
-            {pushLog.map((entry, i) => <LogEntry key={i} entry={entry} />)}
-          </div>
-
-          {/* Failed Records Debug Table */}
-          {done && pushSummary?.failed > 0 && (
-            <div className="vld-debug-table-wrap" style={{ borderTop: '1px solid var(--border)' }}>
-              <div className="vld-debug-table-header">
-                <span className="vld-debug-table-title">
-                  ⚠ Failed Records — Click a row to see debug info above
-                </span>
-                <button className="btn btn--ghost btn--sm" onClick={handlePush}>↺ Retry All Failed</button>
-              </div>
-              <table className="vld-debug-table">
-                <thead><tr><th>RECORD ID</th><th>RESOURCE</th><th>ENDPOINT</th><th>HTTP</th><th>ERROR</th></tr></thead>
-                <tbody>
-                  {pushLog.filter(e => !e.success).map((e, i) => (
-                    <tr key={i}>
-                      <td className="vld-record-id">{e.recordId}</td>
-                      <td>{TAB_LABELS[e.resource] || e.resource}</td>
-                      <td><code style={{ fontSize: '0.68rem' }}>{e.endpoint}</code></td>
-                      <td><span className="err-tag err-tag--null">{e.httpStatus}</span></td>
-                      <td className="vld-debug-detail">{e.error} — {e.detail}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
         </div>
-      )}
+      </div>
 
-      {/* AI Post-Push Failure Analysis */}
-      <ApiPostPushBot pushLog={pushLog} pushSummary={pushSummary} />
-
-      {/* Bottom Bar */}
+      {/* ── Bottom bar ─────────────────────────────────── */}
       <div className="push-select-bar">
         <div className="push-select-bar__legal">© 2024 MediSync Clinical Systems. HIPAA Compliant.</div>
         <div className="push-select-bar__right">

@@ -20,12 +20,10 @@ _log = logging.getLogger("medisync.config")
 
 # ── Resolve .env path ──────────────────────────────────────
 # config.py lives at: backend/app/core/config.py
-# parents[0] = backend/app/core
-# parents[1] = backend/app
-# parents[2] = backend
-# parents[3] = medisync   <-- project root where .env lives
+# parents[2] = backend  (host) / /app (container, since Dockerfile WORKDIR=/app
+# and `COPY . .` copies backend/ contents — including .env — into /app)
 _THIS_FILE = Path(__file__).resolve()
-_ROOT      = _THIS_FILE.parents[3]
+_ROOT      = _THIS_FILE.parents[2]
 _ENV_PATH  = _ROOT / ".env"
 
 _log.debug(f"[config] __file__     = {_THIS_FILE}")

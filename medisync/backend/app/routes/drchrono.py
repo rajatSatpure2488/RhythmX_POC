@@ -4,8 +4,13 @@ Uses real DrChrono API via OAuth proxy. No FHIR — native DrChrono payloads.
 """
 from __future__ import annotations
 from typing import Any, Dict, Optional
-from fastapi import APIRouter, Query, Body
-from app.services.drchrono_proxy import drchrono_get, drchrono_post, drchrono_post_document, drchrono_post_document_base64
+from fastapi import APIRouter, Query, Body, File, Form, UploadFile, HTTPException
+from app.services.drchrono_proxy import (
+    drchrono_get, drchrono_post,
+    drchrono_post_document, drchrono_post_document_base64,
+    SUPPORTED_DOCUMENT_EXTENSIONS, DOCUMENT_MAGIC_BYTES, DOCUMENT_MIME_TYPES,
+    MAX_DOCUMENT_SIZE_BYTES,
+)
 
 router = APIRouter()
 
@@ -215,7 +220,6 @@ async def create_document(payload: Dict[str, Any] = Body(..., examples=[{
     """
     b64 = payload.get("document", "")
     if not b64:
-        from fastapi import HTTPException
         raise HTTPException(400, "'document' field (base64 file content) is required.")
 
     return drchrono_post_document_base64(
@@ -263,7 +267,6 @@ async def create_document_from_fhir(fhir: Dict[str, Any] = Body(..., examples=[{
       - _drchrono_patient_id (custom)   → patient
       - _drchrono_doctor_id  (custom)   → doctor
     """
-    from fastapi import HTTPException
 
     # Extract attachment from first content entry
     content_list = fhir.get("content") or []
@@ -295,6 +298,73 @@ async def create_document_from_fhir(fhir: Dict[str, Any] = Body(..., examples=[{
         mime_type=attachment.get("contentType") or "application/pdf",
         metatags=",".join(fhir.get("category", [])) if isinstance(fhir.get("category"), list) else "",
     )
+
+
+@router.get("/documents/{doc_id}", tags=["R8 — Documents"], summary="Get single document by ID")
+async def get_document(doc_id: int):
+    """GET https://app.drchrono.com/api/documents/{id}"""
+    return drchrono_get(f"documents/{doc_id}", {})
+
+
+@router.post("/documents/file", tags=["R8 — Documents"], summary="Upload document via real file (multipart)")
+async def upload_document_file(
+    patient:     int        = Form(...,  description="DrChrono patient ID"),
+    doctor:      int        = Form(...,  description="DrChrono doctor ID"),
+    description: str        = Form(...,  description="Human-readable label for the document"),
+    date:        str        = Form(...,  description="Document date (YYYY-MM-DD)"),
+    file:        UploadFile = File(...,  description="PDF or image file (pdf/jpg/jpeg/png/gif/bmp, max 10 MB)"),
+    metatags:    str        = Form("",   description="Tags — comma or pipe separated, e.g. lab|cbc"),
+    archived:    bool       = Form(False, description="Archive document immediately after upload"),
+):
+    """
+    POST https://app.drchrono.com/api/documents (multipart/form-data)
+
+    Accepts a **real file upload** — no base64 encoding needed.
+    Validates file extension, size (≤10 MB), and binary magic bytes before
+    forwarding to DrChrono.
+
+    Supported types: pdf, jpg, jpeg, png, gif, bmp
+    """
+    filename  = file.filename or "document.pdf"
+    extension = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+
+    if extension not in SUPPORTED_DOCUMENT_EXTENSIONS:
+        raise HTTPException(
+            400,
+            f"Unsupported file type '{extension}'. "
+            f"Supported: {', '.join(sorted(SUPPORTED_DOCUMENT_EXTENSIONS))}",
+        )
+
+    file_bytes = await file.read()
+
+    if len(file_bytes) > MAX_DOCUMENT_SIZE_BYTES:
+        raise HTTPException(
+            400,
+            f"File too large: {len(file_bytes)/1024/1024:.2f} MB. Max allowed: 10 MB.",
+        )
+
+    expected_magic = DOCUMENT_MAGIC_BYTES.get(extension)
+    if expected_magic and not file_bytes.startswith(expected_magic):
+        raise HTTPException(
+            400,
+            f"File extension is '{extension}' but binary content does not match. "
+            "Upload a real file, not a renamed one.",
+        )
+
+    mime_type = DOCUMENT_MIME_TYPES.get(extension, "application/octet-stream")
+
+    return drchrono_post_document(
+        patient=patient,
+        doctor=doctor,
+        description=description.strip(),
+        date=date[:10],
+        document_bytes=file_bytes,
+        filename=filename,
+        mime_type=mime_type,
+        metatags=metatags,
+        archived=archived,
+    )
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # R9 — Clinical Notes
