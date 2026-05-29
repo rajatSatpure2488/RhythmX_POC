@@ -923,6 +923,7 @@ from typing import Any, List, Optional
 
 import requests
 from fastapi import APIRouter, HTTPException, File, Form, UploadFile
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.core import config
@@ -1081,12 +1082,14 @@ def _active_status(value: Any, default: str = "active") -> str:
 
 
 def _condition_status(record: dict) -> str:
-    """DrChrono /problems status field must be capitalized: 'Active' or 'Resolved'."""
+    """DrChrono /problems status enum is lowercase: 'active' or 'resolved'.
+    Verified empirically — DrChrono rejects 'Active' with
+    {"status":["\\"Active\\" is not a valid choice."]}."""
     clinical = record.get("clinicalStatus")
     if isinstance(clinical, dict):
         text = _codeable_text(clinical).lower()
         if "resolved" in text or "inactive" in text:
-            return "Resolved"
+            return "resolved"
 
     raw = str(
         record.get("status")
@@ -1095,8 +1098,8 @@ def _condition_status(record: dict) -> str:
         or "active"
     ).lower()
     if raw in ("resolved", "inactive", "entered-in-error", "remission"):
-        return "Resolved"
-    return "Active"
+        return "resolved"
+    return "active"
 
 
 def _first_present(record: dict, *keys: str, default: Any = "") -> Any:
@@ -1233,10 +1236,11 @@ def _map_medication(record: dict, doctor_id: Optional[int], patient_id: Optional
 def _map_condition(record: dict, doctor_id: Optional[int], patient_id: Optional[int]) -> dict:
     """
     Map to DrChrono /problems.
-    Required: patient, doctor, description
-    Optional: icd_code (string, e.g. 'Z87.39'), date_onset (YYYY-MM-DD), status ('Active'/'Resolved')
+    Verified field names (from live DrChrono 400 responses):
+      Required: patient, doctor, description
+      Optional: icd_code, date_onset, status ('active' / 'resolved' — lowercase only)
     """
-    name = (
+    description = (
         record.get("description")
         or record.get("name")
         or record.get("name_full")
@@ -1248,11 +1252,10 @@ def _map_condition(record: dict, doctor_id: Optional[int], patient_id: Optional[
     payload = {
         "patient": int(patient_id) if patient_id else None,
         "doctor": int(doctor_id) if doctor_id else None,
-        "description": name,
+        "description": description,
         "status": _condition_status(record),
     }
 
-    # Fixed: operator precedence bug in original — evaluate icd_code unconditionally
     icd_code = (
         record.get("icd_code")
         or record.get("code_value")
@@ -1269,13 +1272,10 @@ def _map_condition(record: dict, doctor_id: Optional[int], patient_id: Optional[
         or record.get("start_dt")
         or record.get("onset_date")
         or record.get("diagnosis_date")
+        or record.get("date_diagnosis")
     )
     if onset:
         payload["date_onset"] = _normalize_date(onset)
-
-    notes = record.get("notes") or record.get("comment") or record.get("clinical_notes")
-    if notes:
-        payload["notes"] = str(notes)
 
     return _strip_empty(payload)
 
@@ -1355,6 +1355,8 @@ def _map_allergy(record: dict, doctor_id: Optional[int], patient_id: Optional[in
         record.get("description")
         or record.get("name")
         or record.get("name_full")
+        or record.get("name_short")
+        or record.get("substance")
         or _codeable_text(record.get("code"))
         or ""
     )
@@ -1369,9 +1371,36 @@ def _map_allergy(record: dict, doctor_id: Optional[int], patient_id: Optional[in
     reaction = record.get("reaction") or record.get("reaction_manifestation")
     if isinstance(reaction, list) and reaction:
         reaction = _codeable_text((reaction[0] or {}).get("manifestation"))
-
     if reaction:
         payload["reaction"] = str(reaction)
+
+    notes = _first_present(record, "notes", "note", "allergy_note")
+    if notes:
+        payload["notes"] = str(notes)
+
+    snomed_reaction = record.get("snomed_reaction")
+    if snomed_reaction:
+        payload["snomed_reaction"] = str(snomed_reaction)
+
+    raw_code = record.get("code")
+    if isinstance(raw_code, dict):
+        raw_code = _codeable_code(raw_code)
+    raw_code = str(raw_code or "").strip()
+    code_vocab = str(record.get("code_vocab") or "").upper()
+    if raw_code:
+        if "SNOMED" in code_vocab:
+            payload["snomed_code"] = raw_code
+        elif "RXNORM" in code_vocab or code_vocab.startswith("RX"):
+            payload["rxnorm"] = raw_code
+
+    rxnorm = record.get("rxnorm")
+    if rxnorm:
+        payload["rxnorm"] = str(rxnorm)
+
+    vs_raw = _first_present(record, "verification_status", "verificationStatus", default="confirmed")
+    if isinstance(vs_raw, dict):
+        vs_raw = _codeable_text(vs_raw) or "confirmed"
+    payload["verification_status"] = str(vs_raw).strip().lower() or "confirmed"
 
     return _strip_empty(payload)
 
@@ -2151,6 +2180,154 @@ async def push_run(req: PushRequest):
         "patient_id": current_patient_id,
         "stats": stats,
     }
+
+
+# Push order shared between /run and /run-stream
+_PUSH_ORDER = [
+    "patient", "patients", "encounter", "encounters", "appointment", "appointments",
+    "condition", "conditions", "problem", "problems", "problem_list",
+    "medication", "medications", "allergy", "allergies",
+    "immunization", "immunizations", "diagnostic_report", "diagnostic_reports",
+    "report", "reports", "observation", "observations",
+    "observation_note", "observation_notes", "service_request", "service_requests",
+    "procedure", "procedures", "coverage", "coverages",
+    "document", "documents", "document_reference", "document_references",
+    "clinical_note", "clinical_notes",
+]
+
+
+@router.post("/run-stream")
+def push_run_stream(req: PushRequest):
+    """Streaming push: yields NDJSON, one line per record + final summary line.
+
+    Each record line:
+      {"type":"record","resource":...,"record_id":...,"index":...,
+       "status_code":...,"success":...,"already_exists":...,"error":...,
+       "drchrono_id":...,"latency_ms":...}
+    Final line:
+      {"type":"summary","total":...,"successful":...,"failed":...,
+       "already_exists":...,"patient_id":...,"stats":{...}}
+    """
+    source = _SESSION.get("resources") or _SESSION.get("mapped")
+    if not source:
+        raise HTTPException(status_code=400, detail="No dataset loaded. Upload a file first.")
+
+    target_keys = req.resources if req.resources else list(source.keys())
+
+    token: Optional[str] = None
+    doctor_id = req.doctor_id
+
+    if not req.dry_run:
+        tok_obj = token_store.get_token()
+        if req.access_token:
+            token = req.access_token
+        elif tok_obj and tok_obj.access_token:
+            token = tok_obj.access_token
+        else:
+            raise HTTPException(status_code=401, detail="No DrChrono token. Please authenticate first.")
+        if not doctor_id and tok_obj and tok_obj.doctor_id:
+            try:
+                doctor_id = int(tok_obj.doctor_id)
+            except (TypeError, ValueError):
+                pass
+
+    ordered = [k for k in _PUSH_ORDER if k in target_keys]
+    ordered += [k for k in target_keys if k not in ordered]
+
+    def generate():
+        stats: dict[str, dict] = {}
+        current_patient_id = req.patient_id
+        already_exists_total = 0
+
+        for key in ordered:
+            records = source.get(key, [])
+            if not records:
+                continue
+
+            total = successful = failed = already_exists_count = 0
+            errors: list[str] = []
+
+            for idx, record in enumerate(records):
+                total += 1
+                t0 = time.time()
+
+                if req.dry_run:
+                    sim = _simulate_push([record], key)
+                    result = {
+                        "success": sim.get("would_succeed", 0) > 0,
+                        "status_code": 201 if sim.get("would_succeed", 0) > 0 else 400,
+                        "drchrono_id": None,
+                        "error": None,
+                        "already_exists": False,
+                    }
+                else:
+                    assert token is not None
+                    result = _live_push_record(
+                        record, key, token,
+                        doctor_id=doctor_id, patient_id=current_patient_id,
+                    )
+
+                latency_ms = int((time.time() - t0) * 1000)
+
+                if result.get("already_exists"):
+                    already_exists_count += 1
+                    already_exists_total += 1
+                    successful += 1
+                    if key in ("patient", "patients") and result.get("drchrono_id"):
+                        current_patient_id = result["drchrono_id"]
+                elif result.get("success"):
+                    successful += 1
+                    if key in ("patient", "patients") and result.get("drchrono_id"):
+                        current_patient_id = result["drchrono_id"]
+                else:
+                    failed += 1
+                    err = result.get("error", "unknown error")
+                    errors.append(err)
+
+                rec_id = (
+                    record.get("id")
+                    or record.get("patient_id")
+                    or f"{key.upper()}-{idx + 1}"
+                )
+                event = {
+                    "type": "record",
+                    "resource": key,
+                    "record_id": str(rec_id),
+                    "index": idx,
+                    "status_code": result.get("status_code") or 0,
+                    "success": bool(result.get("success") or result.get("already_exists")),
+                    "already_exists": bool(result.get("already_exists")),
+                    "error": None if result.get("success") or result.get("already_exists")
+                             else result.get("error"),
+                    "drchrono_id": result.get("drchrono_id"),
+                    "latency_ms": latency_ms,
+                }
+                yield json.dumps(event) + "\n"
+
+                if not req.dry_run:
+                    time.sleep(0.1)
+
+            stats[key] = {
+                "total": total, "successful": successful, "failed": failed,
+                "already_exists": already_exists_count, "errors": errors[:5],
+            }
+
+        summary = {
+            "type": "summary",
+            "total": sum(s["total"] for s in stats.values()),
+            "successful": sum(s["successful"] for s in stats.values()),
+            "failed": sum(s["failed"] for s in stats.values()),
+            "already_exists": already_exists_total,
+            "patient_id": current_patient_id,
+            "stats": stats,
+        }
+        yield json.dumps(summary) + "\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="application/x-ndjson",
+        headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

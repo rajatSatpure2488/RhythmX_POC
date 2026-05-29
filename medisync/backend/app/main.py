@@ -3,13 +3,15 @@ MediSync FastAPI Backend — main.py
 Entry point: loads config, registers routers, configures CORS.
 """
 
-# config must be imported first — it loads .env at module level
+# logger first — initializes the rotating file handler before anything else logs.
+from app.core import logger as _logger  # noqa: F401
+# config must be imported next — it loads .env at module level
 from app.core import config
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routes import auth, upload, mapping, dryrun, push, ai_explain, drchrono, fhir_proxy
+from app.routes import auth, upload, mapping, dryrun, push, ai_explain, drchrono, fhir_proxy, logs
 
 # ── FHIR Pipeline (independent module — delete this block to remove) ──
 try:
@@ -70,6 +72,7 @@ app.include_router(push.router,       prefix="/push",    tags=["Push"])
 app.include_router(ai_explain.router, prefix="/ai",      tags=["AI Assistant"])
 app.include_router(drchrono.router,   prefix="/drchrono", tags=["DrChrono Resources"])
 app.include_router(fhir_proxy.router, prefix="/fhir-proxy", tags=["FHIR Proxy"])
+app.include_router(logs.router,       prefix="/logs",     tags=["Logs"])
 
 # ── FHIR Pipeline (independent — remove this line to disconnect) ──
 if _PIPELINE_AVAILABLE and pipeline_router is not None:
