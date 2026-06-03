@@ -68,6 +68,27 @@ RESOURCE_EXAMPLES = {
 }
 
 
+def _best_filename_alias(fname: str) -> Optional[tuple[str, str]]:
+    """Return (resource_key, matched_alias) for the MOST SPECIFIC alias found in
+    `fname`, or None.
+
+    'Most specific' = longest alias (tie-break: earliest position in the name).
+    Picking the longest match — rather than the first alias in dict order —
+    prevents a broad alias like 'lab' (inside 'labdocs'/'laborders') from
+    beating the specific 'diagnostic' when a file is named
+    'diagnosticreports_labdocs_drchrono.csv'.
+    """
+    best = None  # (alias_len, -position, key, alias) — max() picks longest, then earliest
+    for key, aliases in FILENAME_ALIASES.items():
+        for alias in aliases:
+            pos = fname.find(alias)
+            if pos != -1:
+                cand = (len(alias), -pos, key, alias)
+                if best is None or cand > best:
+                    best = cand
+    return (best[2], best[3]) if best else None
+
+
 def _make_log(filename: str) -> dict:
     return {
         "filename":       filename,
@@ -102,13 +123,15 @@ def _parse_csv(content: bytes, filename: str) -> tuple[dict, dict]:
 
         fname = filename.lower().replace("-", "_").replace(" ", "_")
 
-        # 1. Filename aliases
-        for key, aliases in FILENAME_ALIASES.items():
-            if any(alias in fname for alias in aliases):
-                resources[key] = rows
-                log.update({"detected_as": key, "method": "filename_alias",
-                             "record_count": len(rows), "recognized": True})
-                return resources, log
+        # 1. Filename aliases — most specific (longest) match wins, so
+        #    'diagnostic' beats 'lab' for 'diagnosticreports_labdocs_*.csv'.
+        match = _best_filename_alias(fname)
+        if match:
+            key, _alias = match
+            resources[key] = rows
+            log.update({"detected_as": key, "method": "filename_alias",
+                         "record_count": len(rows), "recognized": True})
+            return resources, log
 
         # 2. Column hints
         cols_str = " ".join(c.lower() for c in columns)
@@ -216,9 +239,9 @@ def _parse_json_fhir(content: bytes, filename: str = "") -> tuple[dict, dict]:
 
 def _guess_resource_type(rtype_or_name: str) -> str:
     name_lower = rtype_or_name.lower().replace("-", "_")
-    for key, aliases in FILENAME_ALIASES.items():
-        if any(alias in name_lower for alias in aliases):
-            return key
+    match = _best_filename_alias(name_lower)
+    if match:
+        return match[0]
     stem = re.sub(r"[^a-z0-9_]", "", Path(name_lower).stem)
     return stem if stem else "unknown"
 

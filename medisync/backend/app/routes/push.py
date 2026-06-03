@@ -952,20 +952,22 @@ ENDPOINT_MAP = {
     "allergies": "allergies",
     "immunization": "vaccines",
     "immunizations": "vaccines",
-    "diagnostic_report": "lab_results",
-    "diagnostic_reports": "lab_results",
-    "report": "lab_results",
-    "reports": "lab_results",
-    "observation": "clinical_note_field_values",
-    "observations": "clinical_note_field_values",
-    "observation_note": "clinical_note_field_values",
-    "observation_notes": "clinical_note_field_values",
+    # Diagnostic reports are pushed as generated PDFs to /api/documents
+    # (the lab API is partner-gated → 403). See _upload_diagnostic_report_as_document.
+    "diagnostic_report": "documents",
+    "diagnostic_reports": "documents",
+    "report": "documents",
+    "reports": "documents",
+    "observation": "documents",
+    "observations": "documents",
+    "observation_note": "documents",
+    "observation_notes": "documents",
     "procedure": "clinical_note_section_field_values",
     "procedures": "clinical_note_section_field_values",
     "service_request": "lab_orders",
     "service_requests": "lab_orders",
-    "coverage": "patient_insurances",
-    "coverages": "patient_insurances",
+    "coverage": "insurances",
+    "coverages": "insurances",
     "document": "documents",
     "documents": "documents",
     "document_reference": "documents",
@@ -974,12 +976,12 @@ ENDPOINT_MAP = {
     "clinical_notes": "clinical_note_field_values",
 }
 
+# DrChrono accepts only Male / Female / Other (NOT "Unknown" — it 400s).
 _GENDER_MAP = {
     "male": "Male", "m": "Male",
     "female": "Female", "f": "Female",
     "other": "Other", "o": "Other",
-    "unknown": "Unknown", "u": "Unknown",
-    "UNK": "Unknown",
+    "unknown": "Other", "u": "Other", "unk": "Other",
 }
 
 SUPPORTED_DOCUMENT_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png", ".gif", ".bmp"}
@@ -1022,7 +1024,8 @@ def _normalize_date(val: Any) -> str:
 def _map_gender(val: Any) -> str:
     if not val:
         return ""
-    return _GENDER_MAP.get(str(val).strip(), str(val).strip())
+    # Case-insensitive lookup; unrecognised values fall back to a valid choice.
+    return _GENDER_MAP.get(str(val).strip().lower(), "Other")
 
 
 def _extract_name(name_field: Any):
@@ -1169,7 +1172,12 @@ def _map_patient(record: dict, doctor_id: Optional[int] = None) -> dict:
             or record.get("birth_date")
             or record.get("dob")
         ),
-        "gender": _map_gender(record.get("gender") or record.get("sex")) or "Unknown",
+        "gender": _map_gender(
+            record.get("gender")
+            or record.get("sex")
+            or record.get("gender_administrative")
+            or record.get("administrative_gender")
+        ) or "Other",
         "email": email or record.get("email", ""),
         "home_phone": phone or record.get("phone") or record.get("home_phone", ""),
         "address": address or record.get("address") or record.get("street", ""),
@@ -1302,15 +1310,20 @@ def _map_encounter(record: dict, doctor_id: Optional[int], patient_id: Optional[
     Note: 'office' must be a DrChrono office/location ID — we omit it and let DrChrono use
           the doctor's default office rather than incorrectly setting it to doctor_id.
     """
-    status_raw = str(_first_present(record, "status", default="Scheduled")).lower()
-    if status_raw in ("finished", "completed", "complete", "arrived"):
+    # DrChrono appointment "status" accepts a fixed enum — "Scheduled" is NOT one of
+    # them (causes 400). Valid choices include Confirmed / Not Confirmed / Arrived /
+    # Complete / Cancelled / In Session. Default unknown/blank to "Confirmed".
+    status_raw = str(_first_present(record, "status", default="")).lower()
+    if status_raw in ("finished", "completed", "complete", "fulfilled", "arrived"):
         status = "Complete"
     elif status_raw in ("cancelled", "canceled", "noshow", "no-show", "no_show"):
         status = "Cancelled"
     elif status_raw in ("in_session", "in session"):
         status = "In Session"
-    else:
-        status = "Scheduled"
+    elif status_raw in ("pending", "proposed", "not confirmed", "not_confirmed"):
+        status = "Not Confirmed"
+    else:  # booked / scheduled / blank / anything else
+        status = "Confirmed"
 
     raw_time = _first_present(
         record,
@@ -1325,27 +1338,34 @@ def _map_encounter(record: dict, doctor_id: Optional[int], patient_id: Optional[
     except (ValueError, TypeError):
         pass
 
+    # DrChrono caps "reason" at 100 chars — anything longer 400s. Truncate safely.
+    reason = _first_present(record, "reason", "encounter_type", "description", "chief_complaint")
+    if reason and len(str(reason)) > 100:
+        reason = str(reason)[:97] + "..."
+
     payload = {
         "patient": int(patient_id) if patient_id else None,
         "doctor": int(doctor_id) if doctor_id else None,
         "scheduled_time": scheduled_time,
         "duration": duration,
         "status": status,
-        "reason": _first_present(record, "reason", "encounter_type", "description", "chief_complaint"),
+        "reason": reason,
         "allow_overlapping": True,
     }
 
-    # Only set office if explicitly provided as an integer office ID (not doctor_id)
+    # Only set office if explicitly provided as an integer office ID (not doctor_id).
+    # If absent, _live_push_record fills the doctor's real office from /api/offices
+    # (DrChrono requires both 'office' and 'exam_room' on appointments).
     office_id = _first_present(record, "office", "office_id", "location_id")
     if office_id and str(office_id).isdigit():
         payload["office"] = int(office_id)
 
-    exam_room = _first_present(record, "exam_room", "room")
-    if exam_room:
-        try:
-            payload["exam_room"] = int(exam_room)
-        except (ValueError, TypeError):
-            pass
+    # exam_room is a 1-based index within the office; default to 1 when not supplied.
+    exam_room = _first_present(record, "exam_room", "room", default=1)
+    try:
+        payload["exam_room"] = int(exam_room)
+    except (ValueError, TypeError):
+        payload["exam_room"] = 1
 
     return _strip_empty(payload)
 
@@ -1794,6 +1814,492 @@ def _upload_document(record: dict, token: str, doctor_id: Optional[int], patient
         }
 
 
+def _render_report_pdf(title: str, report_date: str, body_text: str, meta: dict) -> bytes:
+    """Render a diagnostic-report narrative into a (multi-page) PDF — stdlib only.
+
+    Diagnostic-report rows are text, not files, but DrChrono /api/documents needs a
+    real binary (PDF/JPG/PNG/TIFF). We hand-build a minimal but valid PDF using only
+    the standard library so this never depends on a PDF package being installed in
+    whatever environment the server runs under. Uses the built-in Helvetica fonts
+    (no font embedding) and the two base-14 names F1=Helvetica, F2=Helvetica-Bold.
+    """
+    import textwrap
+
+    PAGE_W, PAGE_H, M = 595, 842, 50          # A4 in points, 50pt margins
+    USABLE = PAGE_W - 2 * M
+
+    def esc(s: str) -> str:
+        s = (s or "").encode("latin-1", "replace").decode("latin-1")
+        return s.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+    # Build (font, size, text) lines, wrapping each by an approximate char width.
+    raw: list[tuple[str, int, str]] = []
+    raw.append(("F2", 16, title or "Diagnostic Report"))
+    raw.append(("F1", 6, ""))                 # spacer
+    for label, val in (("Date", report_date), *meta.items()):
+        if val:
+            raw.append(("F1", 10, f"{label}: {val}"))
+    raw.append(("F1", 6, ""))                 # spacer
+    raw.append(("F1", 11, body_text or "(no report text)"))   # report narrative
+
+    lines: list[tuple[str, int, str]] = []
+    for font, size, text in raw:
+        if text == "":
+            lines.append((font, size, ""))
+            continue
+        width_chars = max(10, int(USABLE / (size * 0.5)))   # Helvetica avg ~0.5*size
+        for para in str(text).split("\n"):
+            for chunk in (textwrap.wrap(para, width=width_chars) or [""]):
+                lines.append((font, size, chunk))
+
+    # Paginate into pages of laid-out (font, size, escaped_text, x, y) lines.
+    pages: list[list] = []
+    cur: list = []
+    y = PAGE_H - M
+    for font, size, text in lines:
+        lh = size * 1.5
+        if y - lh < M:
+            pages.append(cur)
+            cur = []
+            y = PAGE_H - M
+        cur.append((font, size, esc(text), M, y))
+        y -= lh
+    pages.append(cur)
+
+    def content_stream(page) -> bytes:
+        parts = [
+            f"BT /{font} {size} Tf {x} {yy:.1f} Td ({text}) Tj ET"
+            for (font, size, text, x, yy) in page if text != ""
+        ]
+        return ("\n".join(parts)).encode("latin-1", "replace")
+
+    # Assemble objects. Numbering: 1 catalog, 2 pages, 3 F1, 4 F2,
+    # then per page i: page obj = 5+2i, content obj = 6+2i.
+    n_pages = len(pages)
+    objs: dict[int, bytes] = {}
+    objs[1] = b"<< /Type /Catalog /Pages 2 0 R >>"
+    kids = " ".join(f"{5 + 2 * i} 0 R" for i in range(n_pages))
+    objs[2] = f"<< /Type /Pages /Kids [{kids}] /Count {n_pages} >>".encode()
+    objs[3] = b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"
+    objs[4] = b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>"
+    for i, page in enumerate(pages):
+        page_no, content_no = 5 + 2 * i, 6 + 2 * i
+        objs[page_no] = (
+            f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {PAGE_W} {PAGE_H}] "
+            f"/Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> "
+            f"/Contents {content_no} 0 R >>"
+        ).encode()
+        cs = content_stream(page)
+        objs[content_no] = b"<< /Length %d >>\nstream\n%s\nendstream" % (len(cs), cs)
+
+    # Serialize with a proper xref table.
+    out = b"%PDF-1.4\n"
+    offsets: dict[int, int] = {}
+    for num in sorted(objs):
+        offsets[num] = len(out)
+        out += f"{num} 0 obj\n".encode() + objs[num] + b"\nendobj\n"
+    xref_pos = len(out)
+    max_num = max(objs)
+    out += f"xref\n0 {max_num + 1}\n".encode()
+    out += b"0000000000 65535 f \n"
+    for num in range(1, max_num + 1):
+        out += (f"{offsets[num]:010d} 00000 n \n".encode() if num in offsets
+                else b"0000000000 65535 f \n")
+    out += (f"trailer\n<< /Size {max_num + 1} /Root 1 0 R >>\n"
+            f"startxref\n{xref_pos}\n%%EOF").encode()
+    return out
+
+
+def _upload_diagnostic_report_as_document(
+    record: dict, token: str, doctor_id: Optional[int], patient_id: Optional[int]
+) -> dict:
+    """Generate a PDF from a diagnostic-report row and POST it to /api/documents.
+
+    Avoids the lab API (/api/lab_results), which is gated behind DrChrono lab-partner
+    enrollment (403). Documents use the already-granted clinical scope and show up
+    under the patient's Documents in DrChrono.
+    """
+    if not patient_id:
+        return {"success": False, "status_code": 0, "drchrono_id": None,
+                "error": "Cannot upload report: DrChrono patient_id is missing",
+                "already_exists": False}
+
+    description = _first_present(
+        record, "description", "category_text", "name", "name_full",
+        default=_codeable_text(record.get("code")) or "Diagnostic Report",
+    )
+    report_date = _normalize_date(_first_present(
+        record, "date", "date_report", "document_date", "effective_dt",
+        "effectiveDateTime", "report_date",
+    )) or _today_date()
+    body_text = _first_present(
+        record, "test_notes", "conclusion_text", "notes", "conclusion",
+        "clinical_information", "text",
+    )
+    meta = {
+        "Report ID": _first_present(record, "source_report_id", "diagnostic_report_id", "id"),
+        "ICD-10": _first_present(record, "icd10_codes", "conclusion_code"),
+        "Status": _first_present(record, "order_status", "status"),
+    }
+
+    try:
+        pdf_bytes = _render_report_pdf(description, report_date, body_text, meta)
+    except Exception as e:
+        log.error("PDF generation failed for diagnostic report: %s", e)
+        return {"success": False, "status_code": 0, "drchrono_id": None,
+                "error": f"PDF generation error: {e}", "already_exists": False}
+
+    url = f"{config.DRCHRONO_API_BASE}documents"
+    data = {
+        "patient": str(patient_id),
+        "description": str(description)[:100],
+        "date": report_date,
+    }
+    if doctor_id:
+        data["doctor"] = str(doctor_id)
+    # DrChrono /api/documents expects metatags as a JSON array string. Build a clean
+    # one rather than the source 'tags' value, which is a stringified Python list
+    # like "['DemoPatient']" that fails DrChrono's JSON-array parsing.
+    tags = ["diagnostic_report"]
+    category = _first_present(record, "category_text", "description")
+    if category and str(category).strip():
+        tags.append(str(category).strip()[:50])
+    data["metatags"] = json.dumps(tags)
+
+    rid = _first_present(record, "source_report_id", "diagnostic_report_id", "id", default="report")
+    filename = f"diagnostic_report_{rid}.pdf"
+
+    try:
+        log.info("POST %s multipart (generated PDF) fields=%s file=%s size=%d",
+                 url, list(data.keys()), filename, len(pdf_bytes))
+        resp = requests.post(
+            url,
+            headers=_multipart_headers(token),
+            data=data,
+            files={"document": (filename, pdf_bytes, "application/pdf")},
+            timeout=60,
+        )
+        log.info("DrChrono response: %d — %s", resp.status_code, resp.text[:500])
+
+        if resp.status_code in (200, 201):
+            body = resp.json()
+            return {"success": True, "status_code": resp.status_code,
+                    "drchrono_id": body.get("id"), "error": "", "already_exists": False}
+
+        error_detail = resp.text[:1000]
+        try:
+            err_json = resp.json()
+            msgs = []
+            for field, val in err_json.items():
+                msgs.extend(f"{field}: {m}" for m in val) if isinstance(val, list) else msgs.append(f"{field}: {val}")
+            if msgs:
+                error_detail = " | ".join(msgs)
+        except Exception:
+            pass
+        return {"success": False, "status_code": resp.status_code, "drchrono_id": None,
+                "error": error_detail, "already_exists": False}
+
+    except Exception as e:
+        return {"success": False, "status_code": 0, "drchrono_id": None,
+                "error": str(e), "already_exists": False}
+
+
+# Narrative columns on a raw clinical note row -> human-readable section labels.
+_NOTE_SECTION_FIELDS = [
+    ("chief_complaint",            "Chief Complaint"),
+    ("history_of_present_illness", "History of Present Illness"),
+    ("review_of_systems",          "Review of Systems"),
+    ("physical_exam",              "Physical Exam"),
+    ("assessment",                 "Assessment"),
+    ("plan",                       "Plan"),
+    ("social_history",             "Social History"),
+    ("family_history",             "Family History"),
+    ("current_medications",        "Current Medications"),
+]
+
+
+def _aggregate_clinical_notes(records: list) -> list:
+    """Group clinical-note rows by note id into one record per note.
+
+    Handles both shapes: the melted sections file (one row per section, with
+    section_name + value) and a raw notes file (one row, many narrative columns).
+    Produces note-level dicts carrying a `sections` list so each note becomes a
+    single document instead of one document per section.
+    """
+    groups: dict[str, dict] = {}
+    order: list[str] = []
+    for rec in records:
+        nid = str(_first_present(rec, "source_note_id", "note_id", "id", default="")) or f"NOTE-{len(order)+1}"
+        if nid not in groups:
+            groups[nid] = {
+                "source_note_id":      nid,
+                "source_encounter_id": _first_present(rec, "source_encounter_id", "encounter_id"),
+                "source_patient_id":   _first_present(rec, "source_patient_id", "rx_patient_id"),
+                "appointment":         _first_present(rec, "appointment", "appointment_id"),
+                "note_date":           _first_present(rec, "note_date", "date"),
+                "sections":            [],
+            }
+            order.append(nid)
+        grp = groups[nid]
+        # Melted section row (section_name + value).
+        sec_name = _first_present(rec, "section_name")
+        sec_val = _first_present(rec, "value", "note_text")
+        if sec_name and sec_val:
+            grp["sections"].append((str(sec_name), str(sec_val)))
+        # Raw narrative columns.
+        for col, label in _NOTE_SECTION_FIELDS:
+            v = _first_present(rec, col)
+            if v:
+                grp["sections"].append((label, str(v)))
+    return [groups[n] for n in order]
+
+
+def _upload_clinical_note_as_document(
+    note: dict, token: str, doctor_id: Optional[int], patient_id: Optional[int]
+) -> dict:
+    """Render a clinical note's sections into a PDF and POST to /api/documents.
+
+    DrChrono's native clinical-note API (/api/clinical_note_field_values) requires
+    template-bound field IDs tied to an appointment — not available here. Uploading
+    the note as a document (clinical scope) reliably lands it in the patient chart.
+    """
+    if not patient_id:
+        return {"success": False, "status_code": 0, "drchrono_id": None,
+                "error": "Cannot upload clinical note: DrChrono patient_id is missing",
+                "already_exists": False}
+
+    sections = note.get("sections") or []
+    if not sections:
+        return {"success": False, "status_code": 0, "drchrono_id": None,
+                "error": "No clinical note content found — the base file holds only join keys. "
+                         "Push the clinicalnotes_sections file (it carries the note text).",
+                "already_exists": False, "retryable": False}
+
+    body = "\n\n".join(f"{name}:\n{value}" for name, value in sections)
+    report_date = _normalize_date(note.get("note_date")) or _today_date()
+    meta = {
+        "Note ID":  note.get("source_note_id"),
+        "Encounter": note.get("source_encounter_id"),
+    }
+    try:
+        pdf_bytes = _render_report_pdf("Clinical Note", report_date, body, meta)
+    except Exception as e:
+        log.error("PDF generation failed for clinical note: %s", e)
+        return {"success": False, "status_code": 0, "drchrono_id": None,
+                "error": f"PDF generation error: {e}", "already_exists": False}
+
+    url = f"{config.DRCHRONO_API_BASE}documents"
+    data = {"patient": str(patient_id), "description": "Clinical Note", "date": report_date}
+    if doctor_id:
+        data["doctor"] = str(doctor_id)
+    data["metatags"] = json.dumps(["clinical_note"])
+
+    rid = note.get("source_note_id") or "note"
+    filename = f"clinical_note_{rid}.pdf"
+    try:
+        log.info("POST %s multipart (clinical note PDF) file=%s size=%d sections=%d",
+                 url, filename, len(pdf_bytes), len(sections))
+        resp = requests.post(
+            url, headers=_multipart_headers(token), data=data,
+            files={"document": (filename, pdf_bytes, "application/pdf")}, timeout=60,
+        )
+        log.info("DrChrono response: %d — %s", resp.status_code, resp.text[:400])
+        if resp.status_code in (200, 201):
+            return {"success": True, "status_code": resp.status_code,
+                    "drchrono_id": resp.json().get("id"), "error": "", "already_exists": False}
+        error_detail = resp.text[:1000]
+        try:
+            err_json = resp.json()
+            msgs = []
+            for field, val in err_json.items():
+                msgs.extend(f"{field}: {m}" for m in val) if isinstance(val, list) else msgs.append(f"{field}: {val}")
+            if msgs:
+                error_detail = " | ".join(msgs)
+        except Exception:
+            pass
+        return {"success": False, "status_code": resp.status_code, "drchrono_id": None,
+                "error": error_detail, "already_exists": False}
+    except Exception as e:
+        return {"success": False, "status_code": 0, "drchrono_id": None,
+                "error": str(e), "already_exists": False}
+
+
+def _upload_coverage(record: dict, token: str, doctor_id: Optional[int], patient_id: Optional[int]) -> dict:
+    """Create a patient insurance via POST /api/insurances.
+
+    (There is no /api/patient_insurances endpoint — that 404s.) Primary vs secondary
+    is conveyed by the insurance_type field.
+    """
+    if not patient_id:
+        return {"success": False, "status_code": 0, "drchrono_id": None,
+                "error": "Cannot push coverage: DrChrono patient_id is missing",
+                "already_exists": False}
+
+    plan_type = str(_first_present(record, "insurance_plan_type", "coverage_rank", default="primary")).strip().lower()
+    insurance_type = "secondary" if plan_type in ("secondary", "2") else "primary"
+
+    payload = {
+        "patient":                int(patient_id),
+        "insurance_type":         insurance_type,
+        "insurance_company":      _first_present(record, "insurance_company", "payer_name", "payor_name"),
+        "insurance_plan_name":    _first_present(record, "insurance_plan_name", "plan_name", "plan_short_name"),
+        "insurance_id_number":    _first_present(record, "insurance_id_number", "subscriber_id", "member_id"),
+        "insurance_group_number": _first_present(record, "insurance_group_number", "plan_id", "group_number"),
+    }
+    payer = _first_present(record, "payer_id", "payor_id")
+    if payer:
+        payload["payer_id"] = str(payer)
+    payload = {k: v for k, v in payload.items() if v not in (None, "")}
+
+    if not payload.get("insurance_company"):
+        return {"success": False, "status_code": 0, "drchrono_id": None,
+                "error": "Coverage requires insurance_company.", "already_exists": False}
+
+    url = f"{config.DRCHRONO_API_BASE}insurances"
+    try:
+        log.info("POST %s payload=%s", url, payload)
+        resp = requests.post(url, json=payload, headers=_json_headers(token), timeout=20)
+        log.info("DrChrono response: %d — %s", resp.status_code, resp.text[:400])
+        if resp.status_code in (200, 201, 204):
+            drchrono_id = None
+            try:
+                drchrono_id = resp.json().get("id")
+            except Exception:
+                drchrono_id = patient_id
+            return {"success": True, "status_code": resp.status_code,
+                    "drchrono_id": drchrono_id, "error": "", "already_exists": False}
+        error_detail = resp.text[:1000]
+        try:
+            err_json = resp.json()
+            msgs = []
+            for field, val in err_json.items():
+                msgs.extend(f"{field}: {m}" for m in val) if isinstance(val, list) else msgs.append(f"{field}: {val}")
+            if msgs:
+                error_detail = " | ".join(msgs)
+        except Exception:
+            pass
+        return {"success": False, "status_code": resp.status_code, "drchrono_id": None,
+                "error": error_detail, "already_exists": False}
+    except Exception as e:
+        return {"success": False, "status_code": 0, "drchrono_id": None,
+                "error": str(e), "already_exists": False}
+
+
+_VITAL_COLUMNS = [
+    ("bp_s", "BP Systolic"), ("bp_d", "BP Diastolic"), ("pulse", "Pulse"),
+    ("respiratory_rate", "Respiratory Rate"), ("temperature", "Temperature"),
+    ("weight", "Weight"), ("height", "Height"),
+    ("oxygen_saturation", "O2 Saturation"), ("bmi", "BMI"),
+]
+
+
+def _aggregate_observations(records: list) -> list:
+    """Group observation rows by encounter into one record per encounter.
+
+    Handles both transformed shapes: pivoted vitals (one row, many vital columns)
+    and lab results (one row per test). So each encounter becomes a single document
+    containing its vitals and/or lab panel.
+    """
+    groups: dict[str, dict] = {}
+    order: list[str] = []
+    for rec in records:
+        enc = str(_first_present(rec, "source_encounter_id", "encounter_id", default=""))
+        gid = enc or f"OBS-{len(order)+1}"
+        if gid not in groups:
+            groups[gid] = {
+                "source_encounter_id": enc,
+                "source_patient_id":   _first_present(rec, "source_patient_id", "rx_patient_id"),
+                "date":                _first_present(rec, "date_collected", "effective_dt", "date"),
+                "vitals":              [],
+                "labs":                [],
+            }
+            order.append(gid)
+        grp = groups[gid]
+        for col, label in _VITAL_COLUMNS:
+            v = _first_present(rec, col)
+            if v not in (None, ""):
+                grp["vitals"].append((label, str(v)))
+        test_name = _first_present(rec, "test_name", "name_full", "name_short")
+        note_text = _first_present(rec, "note_text")
+        if test_name:
+            value = _first_present(rec, "value", "value_string")
+            units = _first_present(rec, "units", "value_unit")
+            ab = _first_present(rec, "abnormal_status")
+            line = f"{test_name}: {value}{(' ' + str(units)) if units else ''}{(' [' + str(ab) + ']') if ab else ''}"
+            if note_text:
+                line += f" — {note_text}"
+            grp["labs"].append(line)
+        elif note_text:
+            grp["labs"].append(str(note_text))
+    return [groups[g] for g in order]
+
+
+def _upload_observation_as_document(
+    obs: dict, token: str, doctor_id: Optional[int], patient_id: Optional[int]
+) -> dict:
+    """Render an encounter's observations (vitals + labs) to a PDF and POST to
+    /api/documents. DrChrono's /api/clinical_note_field_values needs template-bound
+    field PKs + an appointment, which raw lab/vital data can't supply."""
+    if not patient_id:
+        return {"success": False, "status_code": 0, "drchrono_id": None,
+                "error": "Cannot upload observations: DrChrono patient_id is missing",
+                "already_exists": False}
+
+    vitals = obs.get("vitals") or []
+    labs = obs.get("labs") or []
+    if not vitals and not labs:
+        return {"success": False, "status_code": 0, "drchrono_id": None,
+                "error": "No observation data found for this encounter.",
+                "already_exists": False, "retryable": False}
+
+    parts = []
+    if vitals:
+        parts.append("VITAL SIGNS:\n" + "\n".join(f"  {n}: {v}" for n, v in vitals))
+    if labs:
+        parts.append("LABORATORY RESULTS:\n" + "\n".join(f"  {l}" for l in labs))
+    body = "\n\n".join(parts)
+    report_date = _normalize_date(obs.get("date")) or _today_date()
+    meta = {"Encounter": obs.get("source_encounter_id")}
+
+    try:
+        pdf_bytes = _render_report_pdf("Clinical Observations", report_date, body, meta)
+    except Exception as e:
+        log.error("PDF generation failed for observations: %s", e)
+        return {"success": False, "status_code": 0, "drchrono_id": None,
+                "error": f"PDF generation error: {e}", "already_exists": False}
+
+    url = f"{config.DRCHRONO_API_BASE}documents"
+    data = {"patient": str(patient_id), "description": "Clinical Observations", "date": report_date}
+    if doctor_id:
+        data["doctor"] = str(doctor_id)
+    data["metatags"] = json.dumps(["observations"])
+    filename = f"observations_{obs.get('source_encounter_id') or 'enc'}.pdf"
+    try:
+        log.info("POST %s multipart (observations PDF) file=%s size=%d vitals=%d labs=%d",
+                 url, filename, len(pdf_bytes), len(vitals), len(labs))
+        resp = requests.post(url, headers=_multipart_headers(token), data=data,
+                             files={"document": (filename, pdf_bytes, "application/pdf")}, timeout=60)
+        log.info("DrChrono response: %d — %s", resp.status_code, resp.text[:400])
+        if resp.status_code in (200, 201):
+            return {"success": True, "status_code": resp.status_code,
+                    "drchrono_id": resp.json().get("id"), "error": "", "already_exists": False}
+        error_detail = resp.text[:1000]
+        try:
+            err_json = resp.json()
+            msgs = []
+            for field, val in err_json.items():
+                msgs.extend(f"{field}: {m}" for m in val) if isinstance(val, list) else msgs.append(f"{field}: {val}")
+            if msgs:
+                error_detail = " | ".join(msgs)
+        except Exception:
+            pass
+        return {"success": False, "status_code": resp.status_code, "drchrono_id": None,
+                "error": error_detail, "already_exists": False}
+    except Exception as e:
+        return {"success": False, "status_code": 0, "drchrono_id": None,
+                "error": str(e), "already_exists": False}
+
+
 def _simulate_push(records: list, resource: str) -> dict:
     if not records:
         return {"total": 0, "successful": 0, "failed": 0}
@@ -1832,6 +2338,49 @@ def _find_existing_patient(payload: dict, token: str) -> Optional[int]:
     return None
 
 
+# Cache resolved (office_id, exam_room) per (token, doctor) so we hit /api/offices
+# at most once per push run instead of once per appointment record.
+_OFFICE_CACHE: dict = {}
+
+
+def _get_default_office(token: str, doctor_id: Optional[int]) -> tuple[Optional[int], int]:
+    """Resolve a usable (office_id, exam_room) from DrChrono /api/offices.
+
+    DrChrono requires both 'office' and 'exam_room' on appointments and rejects a
+    guessed office ID. We pick the doctor's office (falling back to the first office
+    on the account) and its first exam room. Result is cached per token+doctor.
+    """
+    cache_key = (token[-12:] if token else "", doctor_id)
+    if cache_key in _OFFICE_CACHE:
+        return _OFFICE_CACHE[cache_key]
+
+    office_id: Optional[int] = None
+    exam_room: int = 1
+    try:
+        url = f"{config.DRCHRONO_API_BASE}offices"
+        resp = requests.get(url, headers=_json_headers(token), timeout=15)
+        log.info("Offices GET %s status=%d", url, resp.status_code)
+        if resp.status_code == 200:
+            results = resp.json().get("results", [])
+            chosen = None
+            if doctor_id:
+                chosen = next((o for o in results if o.get("doctor") == doctor_id), None)
+            if not chosen and results:
+                chosen = results[0]
+            if chosen:
+                office_id = chosen.get("id")
+                rooms = chosen.get("exam_rooms") or []
+                if rooms and isinstance(rooms[0], dict):
+                    exam_room = rooms[0].get("index", 1) or 1
+        else:
+            log.warning("Offices lookup returned %d: %s", resp.status_code, resp.text[:300])
+    except Exception as e:
+        log.warning("Office lookup failed: %s", e)
+
+    _OFFICE_CACHE[cache_key] = (office_id, exam_room)
+    return office_id, exam_room
+
+
 def _live_push_record(
     record: dict,
     resource: str,
@@ -1857,6 +2406,34 @@ def _live_push_record(
     if key in ("document", "documents", "document_reference", "document_references"):
         return _upload_document(record, token, doctor_id=doctor_id, patient_id=patient_id)
 
+    # Diagnostic reports are narrative text with no attached file. We render each
+    # to a PDF and upload via /api/documents (clinical scope) rather than the
+    # lab-partner-gated /api/lab_results (which returns 403).
+    if key in ("diagnostic_report", "diagnostic_reports", "report", "reports"):
+        return _upload_diagnostic_report_as_document(
+            record, token, doctor_id=doctor_id, patient_id=patient_id
+        )
+
+    # Clinical notes are pushed as generated PDFs to /api/documents. The records
+    # arriving here are note-level (aggregated from section rows in generate()).
+    if key in ("clinical_note", "clinical_notes"):
+        return _upload_clinical_note_as_document(
+            record, token, doctor_id=doctor_id, patient_id=patient_id
+        )
+
+    # Coverages attach to the patient via PATCH /api/patients/{id} — there is no
+    # /api/patient_insurances endpoint (it 404s).
+    if key in ("coverage", "coverages"):
+        return _upload_coverage(record, token, doctor_id=doctor_id, patient_id=patient_id)
+
+    # Observations (labs/vitals) and observation notes are pushed as a per-encounter
+    # PDF to /api/documents. /api/clinical_note_field_values needs template-bound
+    # field PKs + an appointment, which raw observation data can't supply.
+    if key in ("observation", "observations", "observation_note", "observation_notes"):
+        return _upload_observation_as_document(
+            record, token, doctor_id=doctor_id, patient_id=patient_id
+        )
+
     patient_optional_keys = {"clinical_note", "clinical_notes"}
     if not is_patient and not patient_id and key not in patient_optional_keys:
         return {
@@ -1880,6 +2457,32 @@ def _live_push_record(
             "error": f"Mapping error: {e}",
             "already_exists": False,
         }
+
+    # Appointments require a real DrChrono office ID. If the source data didn't
+    # carry one, resolve the doctor's default office (cached) and fill it in.
+    if key in ("encounter", "encounters", "appointment", "appointments") and not payload.get("office"):
+        office_id, exam_room = _get_default_office(token, doctor_id)
+        if office_id:
+            payload["office"] = office_id
+            payload.setdefault("exam_room", exam_room)
+
+    # DrChrono only accepts appointment times in the current century (2000-2099).
+    # Pre-2000 dates ALWAYS 400 — fail fast locally with a clear, field-tagged
+    # message instead of wasting a round-trip, and so the UI can show exactly
+    # which field/value was rejected. This is deterministic → not retryable.
+    if key in ("encounter", "encounters", "appointment", "appointments"):
+        sched = str(payload.get("scheduled_time") or "")
+        year = sched[:4]
+        if year.isdigit() and int(year) < 2000:
+            return {
+                "success": False,
+                "status_code": 422,
+                "drchrono_id": None,
+                "error": f"scheduled_time: {sched[:10]} is before year 2000 — "
+                         f"DrChrono only accepts appointment dates in the range 2000-2099.",
+                "already_exists": False,
+                "retryable": False,
+            }
 
     if key in ("condition", "conditions", "problem", "problems", "problem_list") and not payload.get("description"):
         return {
@@ -2119,6 +2722,10 @@ async def push_run(req: PushRequest):
 
         if not records:
             continue
+        if key in ("clinical_note", "clinical_notes"):
+            records = _aggregate_clinical_notes(records)
+        if key in ("observation", "observations", "observation_note", "observation_notes"):
+            records = _aggregate_observations(records)
 
         if req.dry_run:
             stats[key] = _simulate_push(records, key)
@@ -2243,6 +2850,13 @@ def push_run_stream(req: PushRequest):
             records = source.get(key, [])
             if not records:
                 continue
+            # Collapse clinical-note section rows into one record per note so each
+            # note becomes a single PDF document instead of one per section.
+            if key in ("clinical_note", "clinical_notes"):
+                records = _aggregate_clinical_notes(records)
+            # Collapse observation rows into one record per encounter.
+            if key in ("observation", "observations", "observation_note", "observation_notes"):
+                records = _aggregate_observations(records)
 
             total = successful = failed = already_exists_count = 0
             errors: list[str] = []
@@ -2289,16 +2903,23 @@ def push_run_stream(req: PushRequest):
                     or record.get("patient_id")
                     or f"{key.upper()}-{idx + 1}"
                 )
+                _status = result.get("status_code") or 0
+                # Validation errors (4xx) are deterministic — retrying won't help.
+                # Transient failures (timeout/connection/5xx, status 0 or >=500) may.
+                _is_fail = not (result.get("success") or result.get("already_exists"))
+                _retryable = result.get("retryable")
+                if _retryable is None:
+                    _retryable = _is_fail and (_status == 0 or _status >= 500)
                 event = {
                     "type": "record",
                     "resource": key,
                     "record_id": str(rec_id),
                     "index": idx,
-                    "status_code": result.get("status_code") or 0,
+                    "status_code": _status,
                     "success": bool(result.get("success") or result.get("already_exists")),
                     "already_exists": bool(result.get("already_exists")),
-                    "error": None if result.get("success") or result.get("already_exists")
-                             else result.get("error"),
+                    "error": None if not _is_fail else result.get("error"),
+                    "retryable": bool(_retryable) if _is_fail else False,
                     "drchrono_id": result.get("drchrono_id"),
                     "latency_ms": latency_ms,
                 }

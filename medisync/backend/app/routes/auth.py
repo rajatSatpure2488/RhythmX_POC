@@ -25,9 +25,16 @@ router = APIRouter()
 log = logging.getLogger("medisync.auth")
 
 # DrChrono OAuth scopes
+# NOTE: labs:read/labs:write are REQUIRED for the lab API endpoints
+# (/api/lab_results, /api/lab_orders, /api/lab_documents) used to push
+# diagnostic reports. Without them DrChrono returns 403
+# "You do not have permission to perform this action." After changing this,
+# the user MUST re-authenticate (disconnect + reconnect) so a new token is
+# issued with the added scope — existing tokens are NOT upgraded in place.
 DRCHRONO_SCOPES = (
     "user:read patients:read patients:write "
-    "clinical:read clinical:write calendar:read calendar:write"
+    "clinical:read clinical:write calendar:read calendar:write "
+    "labs:read labs:write"
 )
 
 
