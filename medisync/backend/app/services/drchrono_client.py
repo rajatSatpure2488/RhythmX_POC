@@ -71,6 +71,40 @@ class DrChronoClient:
 
         return response.json()
 
+    def password_grant(self, username: str, password: str, scope: str = "") -> Dict:
+        """Exchange a username + password directly for tokens (OAuth2 password grant).
+
+        Uses the SAME token endpoint and downstream handling as the auth-code flow.
+        NOTE: DrChrono's OAuth server may not permit the password grant; if it does
+        not, it returns 'unsupported_grant_type' / 'invalid_grant', surfaced below.
+        """
+        payload = {
+            "grant_type":    "password",
+            "username":      username,
+            "password":      password,
+            "client_id":     config.DRCHRONO_CLIENT_ID,
+            "client_secret": config.DRCHRONO_CLIENT_SECRET,
+        }
+        if scope:
+            payload["scope"] = scope
+        headers = {"Content-Type": "application/x-www-form-urlencoded"}
+
+        response = requests.post(
+            config.DRCHRONO_TOKEN_URL,
+            data=payload,
+            headers=headers,
+            timeout=30,
+        )
+        if response.status_code != 200:
+            try:
+                err = response.json()
+                detail = err.get("error_description", err.get("error", response.text))
+            except Exception:
+                detail = response.text
+            raise HTTPException(status_code=401, detail=f"Username/password login failed: {detail}")
+
+        return response.json()
+
     def refresh_token(self, refresh_token: str) -> Dict:
         """Get a new access token using a refresh token."""
         payload = {

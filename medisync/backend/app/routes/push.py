@@ -917,6 +917,7 @@ import logging
 import mimetypes
 import os
 import random
+import re
 import time
 from pathlib import Path
 from typing import Any, List, Optional
@@ -1016,9 +1017,33 @@ def _strip_empty(payload: dict) -> dict:
 
 
 def _normalize_date(val: Any) -> str:
+    """Coerce a date to DrChrono's required YYYY-MM-DD.
+
+    Handles ISO (already correct), DD-MM-YYYY / DD/MM/YYYY (the dataset's format,
+    e.g. 22-07-1988 -> 1988-07-22) and MM-DD-YYYY. Ambiguous day/month defaults to
+    day-first (DD-MM)."""
     if not val:
         return ""
-    return str(val)[:10]
+    s = str(val).strip()
+    # Already ISO (YYYY-MM-DD or full datetime) -> keep the date part.
+    if re.match(r"^\d{4}-\d{2}-\d{2}", s):
+        return s[:10]
+    # YYYY/MM/DD
+    m = re.match(r"^(\d{4})[/.-](\d{1,2})[/.-](\d{1,2})", s)
+    if m:
+        return f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+    # DD-MM-YYYY / DD/MM/YYYY / MM-DD-YYYY
+    m = re.match(r"^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$", s)
+    if m:
+        a, b, year = int(m.group(1)), int(m.group(2)), m.group(3)
+        if a > 12:        # first part can only be a day -> DD-MM-YYYY
+            day, month = a, b
+        elif b > 12:      # second part can only be a day -> MM-DD-YYYY
+            day, month = b, a
+        else:             # ambiguous -> assume day-first (dataset convention)
+            day, month = a, b
+        return f"{year}-{month:02d}-{day:02d}"
+    return s[:10]
 
 
 def _map_gender(val: Any) -> str:

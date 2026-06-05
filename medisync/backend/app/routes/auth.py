@@ -79,14 +79,12 @@ class ExchangeRequest(BaseModel):
     code: str
 
 
-@router.post("/oauth/exchange", response_model=AuthStatusResponse)
-def oauth_exchange(req: ExchangeRequest):
+def _finalize_login(token_data: dict) -> AuthStatusResponse:
+    """Shared post-token process: pull tokens, fetch the doctor profile, store, respond.
+
+    Used by BOTH the OAuth authorization-code flow and the username/password flow,
+    so they behave identically once a token has been obtained.
     """
-    Called by the React frontend after DrChrono redirects to http://localhost:8501?code=...
-    Exchanges the code for tokens and stores them.
-    """
-    # 1. Exchange code for tokens
-    token_data    = drchrono_client.exchange_code(req.code)
     access_token  = token_data.get("access_token")
     refresh_token = token_data.get("refresh_token")
     expires_in    = token_data.get("expires_in", 172800)
@@ -94,7 +92,7 @@ def oauth_exchange(req: ExchangeRequest):
     if not access_token:
         raise HTTPException(status_code=400, detail="DrChrono did not return an access_token")
 
-    # 2. Fetch doctor profile
+    # Fetch doctor profile (auth still succeeds even if this fails)
     doctor_name = None
     doctor_id   = None
     try:
@@ -107,16 +105,15 @@ def oauth_exchange(req: ExchangeRequest):
             last        = doctor.get("last_name", "")
             doctor_name = f"Dr. {first} {last}".strip()
     except Exception:
-        pass  # Auth still succeeds even if profile fetch fails
+        pass
 
-    # 3. Clear prerequisite cache from previous session
+    # Clear prerequisite cache from a previous session
     try:
         from app.services.prerequisite_resolver import clear_cache
         clear_cache()
     except ImportError:
         pass
 
-    # 4. Store tokens
     token_store.set_token(
         access_token=access_token,
         expires_in=expires_in,
@@ -132,6 +129,33 @@ def oauth_exchange(req: ExchangeRequest):
         expires_in=token_store.seconds_until_expiry(),
         last_handshake=_handshake_str(),
     )
+
+
+@router.post("/oauth/exchange", response_model=AuthStatusResponse)
+def oauth_exchange(req: ExchangeRequest):
+    """
+    Called by the React frontend after DrChrono redirects to http://localhost:8501?code=...
+    Exchanges the code for tokens and stores them.
+    """
+    token_data = drchrono_client.exchange_code(req.code)
+    return _finalize_login(token_data)
+
+
+# ── POST /auth/login (username + password) ───────────────
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+@router.post("/login", response_model=AuthStatusResponse)
+def login_with_password(req: LoginRequest):
+    """Log in with a DrChrono username + password (OAuth2 password grant).
+
+    Runs the SAME token-exchange + storage process as the OAuth redirect flow,
+    just obtaining the token from credentials instead of an auth code.
+    """
+    token_data = drchrono_client.password_grant(req.username, req.password, DRCHRONO_SCOPES)
+    return _finalize_login(token_data)
 
 
 # ── POST /auth/manual ────────────────────────────────────
