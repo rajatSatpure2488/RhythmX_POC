@@ -23,7 +23,7 @@ FILENAME_ALIASES: dict[str, list[str]] = {
     "encounters":         ["encounter", "visit", "consult"],
     "conditions":         ["condition", "diagnosis", "problem", "icd"],
     "medications":        ["medication", "drug", "prescription", "med", "rx"],
-    "observation_notes":  ["observation_note", "obs_note"],
+    "observation_notes":  ["observation_note", "observationnote", "obs_note", "obsnote"],
     "observations":       ["observation", "vital", "lab_result", "labresult", "lab", "result"],
     "allergies":          ["allerg", "intolerance"],
     "immunizations":      ["immunization", "vaccine", "immunisation", "vaccination"],

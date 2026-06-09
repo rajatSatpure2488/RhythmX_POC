@@ -89,21 +89,44 @@ class DrChronoClient:
             payload["scope"] = scope
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
 
-        response = requests.post(
-            config.DRCHRONO_TOKEN_URL,
-            data=payload,
-            headers=headers,
-            timeout=30,
-        )
-        if response.status_code != 200:
-            try:
-                err = response.json()
-                detail = err.get("error_description", err.get("error", response.text))
-            except Exception:
-                detail = response.text
-            raise HTTPException(status_code=401, detail=f"Username/password login failed: {detail}")
+        try:
+            response = requests.post(
+                config.DRCHRONO_TOKEN_URL,
+                data=payload,
+                headers=headers,
+                timeout=30,
+            )
+        except requests.RequestException as e:
+            # Network / connection problem reaching DrChrono — never bubble up as 500.
+            raise HTTPException(
+                status_code=502,
+                detail=f"Could not reach DrChrono to sign in: {e}",
+            )
 
-        return response.json()
+        if response.status_code == 200:
+            return response.json()
+
+        # Parse DrChrono's error (may be JSON or HTML).
+        err_code = ""
+        detail = response.text[:300]
+        try:
+            err = response.json()
+            err_code = err.get("error", "")
+            detail = err.get("error_description", err.get("error", detail))
+        except Exception:
+            pass
+
+        # DrChrono does not permit the resource-owner password grant — give a clear,
+        # actionable message instead of a 500/HTML dump.
+        if err_code in ("unsupported_grant_type", "invalid_grant", "unauthorized_client") \
+                or response.status_code >= 500:
+            raise HTTPException(
+                status_code=400,
+                detail="DrChrono does not support username/password sign-in for API apps. "
+                       "Use 'Connect with DrChrono' to sign in on DrChrono's page as that "
+                       "user — their assigned role/permissions are applied automatically.",
+            )
+        raise HTTPException(status_code=401, detail=f"Sign-in failed: {detail}")
 
     def refresh_token(self, refresh_token: str) -> Dict:
         """Get a new access token using a refresh token."""

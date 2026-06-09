@@ -2062,10 +2062,14 @@ def _aggregate_clinical_notes(records: list) -> list:
                 "source_patient_id":   _first_present(rec, "source_patient_id", "rx_patient_id"),
                 "appointment":         _first_present(rec, "appointment", "appointment_id"),
                 "note_date":           _first_present(rec, "note_date", "date"),
+                "vital_signs":         _first_present(rec, "vital_signs", "vitals"),
                 "sections":            [],
             }
             order.append(nid)
         grp = groups[nid]
+        # vital_signs may arrive on any row (e.g. raw note file) — keep the first seen.
+        if not grp.get("vital_signs"):
+            grp["vital_signs"] = _first_present(rec, "vital_signs", "vitals")
         # Melted section row (section_name + value).
         sec_name = _first_present(rec, "section_name")
         sec_val = _first_present(rec, "value", "note_text")
@@ -2147,6 +2151,325 @@ def _upload_clinical_note_as_document(
     except Exception as e:
         return {"success": False, "status_code": 0, "drchrono_id": None,
                 "error": str(e), "already_exists": False}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Clinical notes → DrChrono yellow_notepad
+# ═══════════════════════════════════════════════════════════════════════════════
+# Fixed DrChrono clinical-note template for this practice (never changes).
+TEMPLATE_ID = 7520906
+
+# encounter/appointment source-id  ->  DrChrono numeric appointment_id created during
+# THIS push run. Appointments are pushed before clinical notes, so a note can resolve
+# its appointment here. Reset at the start of every push run.
+_APPT_ID_MAP: dict = {}
+
+# Vital label -> (regex to pull it from free text, display unit). Order is the
+# fixed display order; missing vitals render as an em dash.
+_VITAL_PATTERNS = [
+    ("Temperature", r"\b(?:temp(?:erature)?)\b[:\s]*([0-9]{2,3}(?:\.[0-9])?)", "°F"),
+    ("Pulse",       r"\b(?:pulse|heart\s*rate|hr)\b[:\s]*([0-9]{2,3})", " bpm"),
+    ("BP",          r"\b(?:bp|blood\s*pressure)\b[:\s]*([0-9]{2,3}\s*/\s*[0-9]{2,3})", " mmHg"),
+    ("RR",          r"\b(?:rr|resp(?:iratory)?(?:\s*rate)?)\b[:\s]*([0-9]{1,2})", " rpm"),
+    ("SpO2",        r"\b(?:spo2|sao2|o2\s*sat\w*|oxygen\s*saturation|sat)\b[:\s]*([0-9]{2,3})", "%"),
+    ("Height",      r"\b(?:height|ht)\b[:\s]*([0-9]{2,3}(?:\.[0-9])?)", " in"),
+    ("Weight",      r"\b(?:weight|wt)\b[:\s]*([0-9]{2,3}(?:\.[0-9])?)", " lbs"),
+    ("BMI",         r"\bbmi\b[:\s]*([0-9]{2}(?:\.[0-9])?)", " kg/m²"),
+    ("Pain",        r"\bpain\b[:\s]*([0-9]{1,2})\s*/\s*10", "/10"),
+]
+
+
+def _temp_to_fahrenheit(raw: str) -> str:
+    """Source temperatures are in Celsius (e.g. 36.8); convert to °F so the fixed
+    '°F' label is accurate. Values already in the Fahrenheit range pass through."""
+    try:
+        c = float(raw)
+    except (TypeError, ValueError):
+        return raw
+    return f"{round(c * 9 / 5 + 32, 1)}" if c <= 45 else f"{round(c, 1)}"
+
+
+def _format_vitals(text: str) -> str:
+    """Regex-parse a free-text vital_signs string into the fixed 9-field line.
+    Missing vitals render as 'Not provided' so the layout is always consistent
+    and the push never breaks on incomplete data."""
+    parts = []
+    for label, pattern, unit in _VITAL_PATTERNS:
+        m = re.search(pattern, text, flags=re.IGNORECASE)
+        if m:
+            if label == "BP":
+                val = re.sub(r"\s*", "", m.group(1))
+            elif label == "Temperature":
+                val = _temp_to_fahrenheit(m.group(1).strip())
+            else:
+                val = m.group(1).strip()
+            parts.append(f"{label}: {val}{unit}")
+        else:
+            parts.append(f"{label}: Not provided")
+    return " | ".join(parts)
+
+
+def _build_note_content(note: dict) -> str:
+    """Assemble the yellow_notepad content string: clinical narrative only.
+
+    Vitals are pushed to the appointment's vitals section (PATCH), so they are NOT
+    repeated here — the note carries just CC/HPI/Assessment/Plan."""
+    sec = {label: value for (label, value) in note.get("sections", [])}
+
+    def _sec(label):
+        v = sec.get(label)
+        return v.strip() if v and str(v).strip() else "Not provided"
+
+    cc = _sec("Chief Complaint")
+    hpi = _sec("History of Present Illness")
+    assessment = _sec("Assessment")
+    plan = _sec("Plan")
+    return f"CC: {cc}  HPI: {hpi}  Assessment: {assessment}  Plan: {plan}"
+
+
+def _remember_appointment_id(key: str, record: dict, result: dict) -> None:
+    """After an appointment/encounter is created, store its DrChrono id keyed by every
+    source id on the row, so a clinical note can later resolve its appointment_id."""
+    if key not in ("encounter", "encounters", "appointment", "appointments"):
+        return
+    appt_id = result.get("drchrono_id")
+    if not appt_id:
+        return
+    for k in ("source_encounter_id", "encounter_id", "source_appointment_id", "appointment_id", "id"):
+        v = record.get(k)
+        if v not in (None, ""):
+            _APPT_ID_MAP[str(v)] = appt_id
+
+
+def _resolve_appointment_id(note: dict):
+    """Resolve a note's DrChrono appointment_id from the captured map (or a pre-resolved
+    numeric id already on the row). Returns None if not found locally."""
+    for k in ("source_encounter_id", "encounter_id", "source_appointment_id", "appointment_id", "appointment", "id"):
+        v = note.get(k)
+        if v not in (None, "") and str(v) in _APPT_ID_MAP:
+            return _APPT_ID_MAP[str(v)]
+    for k in ("appointment_id", "appointment"):
+        v = note.get(k)
+        if v not in (None, "") and str(v).isdigit():
+            return int(v)
+    return None
+
+
+def _lookup_appointment_id(token: str, patient_id, date_str: str):
+    """Fallback: ask DrChrono for the patient's appointment(s) and match by date.
+    Lets a note resolve its appointment even if it was created in a previous run /
+    before a restart (when the in-memory map is empty)."""
+    if not token or not patient_id:
+        return None
+    params: dict = {"patient": int(patient_id)}
+    day = (date_str or "")[:10]
+    if day:
+        params["date"] = day
+    try:
+        url = f"{config.DRCHRONO_API_BASE}appointments"
+        resp = requests.get(url, params=params, headers=_json_headers(token), timeout=15)
+        log.info("Appointment lookup GET %s params=%s status=%d", url, params, resp.status_code)
+        if resp.status_code == 200:
+            results = resp.json().get("results", [])
+            if results:
+                return results[0].get("id")
+    except Exception as e:
+        log.warning("Appointment lookup failed: %s", e)
+    return None
+
+
+def _refresh_access_token() -> Optional[str]:
+    """Refresh the DrChrono access token via the stored refresh token (used on 401).
+    Returns the new access token, or None if refresh isn't possible."""
+    try:
+        from app.services.drchrono_client import drchrono_client
+        tok = token_store.get_token()
+        if not tok or not getattr(tok, "refresh_token", None):
+            return None
+        data = drchrono_client.refresh_token(tok.refresh_token)
+        new_access = data.get("access_token")
+        if new_access:
+            token_store.set_token(
+                access_token=new_access,
+                expires_in=data.get("expires_in", 172800),
+                refresh_token=data.get("refresh_token") or tok.refresh_token,
+                doctor_id=tok.doctor_id,
+                doctor_name=tok.doctor_name,
+            )
+            return new_access
+    except Exception as e:
+        log.warning("yellow_notepad token refresh failed: %s", e)
+    return None
+
+
+def _build_vitals_payload(note: dict) -> dict:
+    """Build the DrChrono appointment-vitals PATCH body.
+
+    Prefers structured numeric columns on the row (temperature, systolic_bp, ...),
+    falling back to regex over the standardized vitals string parsed from the row's
+    free-text vital_signs. Only vitals that are actually present are sent; units are
+    fixed per DrChrono's confirmed rules (temperature='f', height/head='inches',
+    weight='lbs')."""
+    text = _format_vitals(str(note.get("vital_signs") or ""))
+
+    def pick(struct_keys, pattern, cast):
+        for k in struct_keys:
+            v = note.get(k)
+            if v not in (None, "", "Not provided"):
+                m = re.search(r"-?\d+\.?\d*", str(v))
+                if m:
+                    try:
+                        return cast(float(m.group(0)))
+                    except (ValueError, TypeError):
+                        pass
+        m = re.search(pattern, text, flags=re.IGNORECASE)
+        if m:
+            try:
+                return cast(float(m.group(1)))
+            except (ValueError, TypeError):
+                pass
+        return None
+
+    temp   = pick(["temperature", "vital_temperature"], r"Temperature:\s*(\d+\.?\d*)", float)
+    pulse  = pick(["pulse", "vital_pulse"], r"Pulse:\s*(\d+)", int)
+    sysbp  = pick(["systolic_bp"], r"BP:\s*(\d+)/", int)
+    diabp  = pick(["diastolic_bp"], r"BP:\s*\d+/(\d+)", int)
+    if sysbp is None or diabp is None:               # combined "160/90" column
+        m = re.search(r"(\d+)\s*/\s*(\d+)", str(note.get("vital_bp") or ""))
+        if m:
+            sysbp = sysbp if sysbp is not None else int(m.group(1))
+            diabp = diabp if diabp is not None else int(m.group(2))
+    rr     = pick(["respiratory_rate", "vital_rr"], r"RR:\s*(\d+)", int)
+    spo2   = pick(["spo2", "vital_spo2"], r"SpO2:\s*(\d+)", int)
+    height = pick(["height", "vital_height"], r"Height:\s*(\d+\.?\d*)", float)
+    weight = pick(["weight", "vital_weight"], r"Weight:\s*(\d+\.?\d*)", float)
+    pain   = pick(["pain_scale", "vital_pain"], r"Pain:\s*(\d+)/10", int)
+
+    vitals: dict = {
+        "head_circumference": 0,
+        "head_circumference_units": "inches",
+        "smoking_status": "blank",
+    }
+    if temp is not None:   vitals["temperature"] = temp; vitals["temperature_units"] = "f"
+    if height is not None: vitals["height"] = height; vitals["height_units"] = "inches"
+    if weight is not None: vitals["weight"] = weight; vitals["weight_units"] = "lbs"
+    if sysbp is not None:  vitals["blood_pressure_1"] = sysbp
+    if diabp is not None:  vitals["blood_pressure_2"] = diabp
+    if pulse is not None:  vitals["pulse"] = pulse
+    if rr is not None:     vitals["respiratory_rate"] = rr
+    if spo2 is not None:   vitals["oxygen_saturation"] = spo2
+    if pain is not None:   vitals["pain"] = str(pain)
+
+    return {"vitals": vitals, "status": "Checked In"}
+
+
+def _patch_appointment_vitals(appt_id, payload: dict, token: str) -> dict:
+    """PATCH structured vitals onto the appointment. Success = 204 No Content.
+    Refreshes the token once on 401 and retries up to 3x on 429/5xx (2s backoff)."""
+    url = f"{config.DRCHRONO_API_BASE}appointments/{appt_id}"
+    tok = token
+    for attempt in range(3):
+        try:
+            resp = requests.patch(url, json=payload, headers=_json_headers(tok), timeout=30)
+        except Exception as e:
+            return {"ok": False, "status_code": 0, "error": str(e)}
+        if resp.status_code == 401:
+            new_tok = _refresh_access_token()
+            if new_tok:
+                tok = new_tok
+                continue
+        if resp.status_code in (429, 500, 502, 503) and attempt < 2:
+            time.sleep(2)
+            continue
+        if resp.status_code == 204:
+            # Verify DrChrono actually persisted the vitals: a 204 is returned even
+            # when an unknown field is silently ignored. GET the appointment back and
+            # log what it stored, so we can confirm the vitals really landed.
+            try:
+                chk = requests.get(url, headers=_json_headers(tok), timeout=15)
+                if chk.status_code == 200:
+                    appt = chk.json()
+                    log.info("Vitals verify appt=%s -> status=%s vitals=%s",
+                             appt_id, appt.get("status"), str(appt.get("vitals"))[:400])
+            except Exception as e:
+                log.warning("Vitals verify GET failed: %s", e)
+            return {"ok": True, "status_code": 204, "error": ""}
+        return {"ok": False, "status_code": resp.status_code, "error": resp.text[:500]}
+    return {"ok": False, "status_code": 0, "error": "retries exhausted"}
+
+
+def _push_clinical_note_yellow_notepad(
+    note: dict, token: str, doctor_id: Optional[int], patient_id: Optional[int]
+) -> dict:
+    """Dual push for one clinical note:
+      STEP 1 — PATCH vitals to /api/appointments/{appointment_id}  (success = 204)
+      STEP 2 — POST the note to /api/yellow_notepad (appointment_id + template_id as
+               query params; body holds only `content`).
+    Vitals are best-effort (a vitals failure is logged but does not drop the note).
+    On 401 the token is refreshed and the request retried.
+    """
+    appt_id = _resolve_appointment_id(note)
+    if not appt_id:
+        # Fallback: look the appointment up live from DrChrono by patient + date.
+        appt_id = _lookup_appointment_id(token, patient_id, note.get("note_date"))
+    if not appt_id:
+        return {"success": False, "status_code": 0, "drchrono_id": None,
+                "error": "No DrChrono appointment found for this note. Push the patient's "
+                         "encounter/appointment first (any run), or ensure the appointment "
+                         "exists in DrChrono for that date.",
+                "already_exists": False, "retryable": True}
+
+    content = _build_note_content(note)
+
+    # ── STEP 1: PATCH structured vitals onto the appointment ──
+    vitals_payload = _build_vitals_payload(note)
+    vitals_result = _patch_appointment_vitals(appt_id, vitals_payload, token)
+    if vitals_result["ok"]:
+        log.info("Vitals PATCH appt=%s -> 204 (%d vitals)", appt_id, len(vitals_payload["vitals"]))
+    else:
+        log.warning("Vitals PATCH appt=%s -> %s %s", appt_id,
+                    vitals_result["status_code"], vitals_result["error"][:200])
+    url = f"{config.DRCHRONO_API_BASE}yellow_notepad"
+    params = {"appointment_id": str(appt_id), "template_id": TEMPLATE_ID}
+    body = {"content": content}
+
+    def _post(tok: str):
+        return requests.post(url, params=params, json=body, headers=_json_headers(tok), timeout=30)
+
+    try:
+        log.info("POST %s?appointment_id=%s&template_id=%s (note %s)",
+                 url, appt_id, TEMPLATE_ID, note.get("source_note_id"))
+        resp = _post(token)
+        if resp.status_code == 401:
+            new_tok = _refresh_access_token()
+            if new_tok:
+                resp = _post(new_tok)
+        log.info("DrChrono response: %d — %s", resp.status_code, resp.text[:400])
+
+        vitals_code = vitals_result["status_code"]
+        vitals_tag = "Vitals 204 ✓" if vitals_result["ok"] else f"Vitals failed ({vitals_code}) ✗"
+        vitals_note = "" if vitals_result["ok"] else f" | {vitals_tag}"
+
+        if resp.status_code in (200, 201):
+            try:
+                nid = resp.json().get("id")
+            except Exception:
+                nid = None
+            # Dual status: note pushed; vitals reported alongside (best-effort).
+            return {"success": True, "status_code": resp.status_code,
+                    "drchrono_id": nid, "error": "", "already_exists": False,
+                    "vitals_status": vitals_code,
+                    "detail": f"{vitals_tag} · Note {resp.status_code} ✓"}
+
+        # 400 = bad appointment_id / template mismatch — surface the full body.
+        return {"success": False, "status_code": resp.status_code, "drchrono_id": None,
+                "error": resp.text[:1000] + vitals_note, "already_exists": False,
+                "vitals_status": vitals_code, "retryable": resp.status_code >= 500}
+    except Exception as e:
+        return {"success": False, "status_code": 0, "drchrono_id": None,
+                "error": str(e), "already_exists": False}
+    finally:
+        time.sleep(0.3)  # 300 ms between yellow_notepad requests
 
 
 def _upload_coverage(record: dict, token: str, doctor_id: Optional[int], patient_id: Optional[int]) -> dict:
@@ -2325,6 +2648,199 @@ def _upload_observation_as_document(
                 "error": str(e), "already_exists": False}
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# Observations + Observation Notes → DrChrono /api/patient_lab_results
+# ═══════════════════════════════════════════════════════════════════════════════
+# Notes indexed by observation_id (built per run) so an observation can be enriched
+# with its matching note (LEFT join: observations is the base).
+_OBS_NOTE_INDEX: dict = {}
+_OBS_HAS_OBS = {"value": False}
+
+# DrChrono lab_order_status valid choices do NOT include "Resulted"/"Cancelled".
+# "In Progress" is confirmed valid; completed results map to "Reviewed".
+_LAB_STATUS_MAP = {
+    "final": "Reviewed", "preliminary": "In Progress", "amended": "Reviewed",
+    "cancelled": "In Progress", "unknown": "In Progress",
+}
+
+
+def _prepare_obs_lab_index(source: dict, ordered: list) -> None:
+    """Index observation_notes by observation_id, and record whether observations are
+    being pushed this run. When they are, note rows are merged into the observation
+    (LEFT join) and NOT pushed separately — so both files together = one set of calls."""
+    _OBS_NOTE_INDEX.clear()
+    for nkey in ("observation_note", "observation_notes"):
+        for note in source.get(nkey, []) or []:
+            oid = str(note.get("observation_id") or "").strip()
+            if oid and oid not in _OBS_NOTE_INDEX:
+                _OBS_NOTE_INDEX[oid] = note
+    _OBS_HAS_OBS["value"] = any(k in ordered for k in ("observation", "observations"))
+
+
+def _lab_order_status(status) -> str:
+    return _LAB_STATUS_MAP.get(str(status or "").strip().lower(), "In Progress")
+
+
+def _lab_value_float(value):
+    """Extract the first numeric token from a value string -> float, or None."""
+    if value in (None, ""):
+        return None
+    m = re.search(r"([\d.]+)", str(value))
+    if m:
+        try:
+            return float(m.group(1))
+        except ValueError:
+            return None
+    return None
+
+
+def _lab_abnormal_flag(value, ref_min, ref_max, data_absent_reason) -> str:
+    vf = _lab_value_float(value)
+    try:
+        if vf is not None and ref_max not in (None, "") and vf > float(ref_max):
+            return "H"
+    except (ValueError, TypeError):
+        pass
+    try:
+        if vf is not None and ref_min not in (None, "") and vf < float(ref_min):
+            return "L"
+    except (ValueError, TypeError):
+        pass
+    if data_absent_reason not in (None, ""):
+        return "N"
+    return ""
+
+
+def _lab_result_value_str(value, value_unit, value_string) -> str:
+    suffix = "Imported via RhythmX AI integration pipeline."
+    if value not in (None, ""):
+        vs = f" {value_string}." if value_string not in (None, "") else ""
+        return f"{value} {value_unit or ''}.{vs} {suffix}".strip()
+    if value_string not in (None, ""):
+        return f"{value_string}. {suffix}"
+    return f"Result not provided. {suffix}"
+
+
+def _lab_normal_range(obs: dict) -> str:
+    rrd = _first_present(obs, "reference_range_display")
+    if rrd:
+        return str(rrd)
+    rmin = _first_present(obs, "reference_min")
+    rmax = _first_present(obs, "reference_max")
+    if rmin or rmax:
+        return f"{rmin}-{rmax}"
+    rn = _first_present(obs, "reference_normal")
+    return str(rn) if rn else "Not provided"
+
+
+def _lab_doctor_comments(note: dict) -> str:
+    suffix = "Result imported through RhythmX AI API integration workflow."
+    body = []
+    note_text = _first_present(note, "note_text")
+    if note_text:
+        body.append(str(note_text))
+    for label, key in (("Reference", "note_reference"), ("Data absent reason", "data_absent_reason"),
+                       ("Category", "category"), ("Tags", "tags")):
+        v = _first_present(note, key)
+        if v:
+            body.append(f"{label}: {v}")
+    if not body:
+        return f"Observation Note: No additional notes available for this result. {suffix}"
+    return f"Observation Note: {' '.join(body)} {suffix}"
+
+
+def _build_lab_result_payload(obs: dict, note: Optional[dict],
+                              doctor_id: Optional[int], patient_id: Optional[int]) -> dict:
+    """Map an observation (+ optional joined note) to the patient_lab_results payload.
+    Missing fields default to 'Not provided' — never raises on null."""
+    obs = obs or {}
+    note = note or {}
+    payload = {
+        "ordering_doctor": int(doctor_id) if doctor_id else None,
+        "patient": int(patient_id) if patient_id else None,
+        "title": _first_present(obs, "name_full", "name_short", "name_rx", "test_name", "code",
+                                default="Lab Result"),
+        "lab_result_value": _lab_result_value_str(
+            _first_present(obs, "value"),
+            _first_present(obs, "value_unit", "units"),
+            _first_present(note, "value_string"),
+        ),
+        "lab_result_value_as_float": _lab_value_float(_first_present(obs, "value")),
+        "lab_result_value_units": _first_present(obs, "value_unit", "units", default="Not provided"),
+        "lab_normal_range": _lab_normal_range(obs),
+        "lab_normal_range_units": _first_present(obs, "value_unit", "units", default="Not provided"),
+        "lab_abnormal_flag": _lab_abnormal_flag(
+            _first_present(obs, "value"),
+            _first_present(obs, "reference_min"),
+            _first_present(obs, "reference_max"),
+            _first_present(note, "data_absent_reason") or _first_present(obs, "data_absent_reason"),
+        ),
+        "lab_order_status": _lab_order_status(_first_present(obs, "status")),
+        # DrChrono requires a full ISO-8601 datetime (YYYY-MM-DDThh:mm:ss), not a date.
+        "date_test_performed": _normalize_datetime(
+            _first_present(obs, "effective_dt", "issued_dt", "date_collected", "note_date")
+            or _first_present(note, "effective_dt", "issued_dt")
+        ),
+        "doctor_signoff": False,
+        "doctor_comments": _lab_doctor_comments(note),
+    }
+    # loinc_code only when the code system is LOINC.
+    code = _first_present(obs, "code")
+    if code and str(_first_present(obs, "code_vocab")).strip().upper() == "LOINC":
+        payload["loinc_code"] = str(code)
+    return payload
+
+
+def _push_lab_result(payload: dict, token: str) -> dict:
+    """POST one assembled lab-result payload to /api/patient_lab_results.
+    401 -> refresh token & retry once; 400/422 -> log full body; 300 ms between calls."""
+    url = f"{config.DRCHRONO_API_BASE}patient_lab_results"
+
+    def _post(tok: str):
+        return requests.post(url, json=payload, headers=_json_headers(tok), timeout=30)
+
+    try:
+        resp = _post(token)
+        if resp.status_code == 401:
+            new_tok = _refresh_access_token()
+            if new_tok:
+                resp = _post(new_tok)
+        log.info("POST %s patient=%s title=%s -> %d",
+                 url, payload.get("patient"), str(payload.get("title"))[:40], resp.status_code)
+        if resp.status_code in (200, 201):
+            try:
+                rid = resp.json().get("id")
+            except Exception:
+                rid = None
+            return {"success": True, "status_code": resp.status_code,
+                    "drchrono_id": rid, "error": "", "already_exists": False}
+        if resp.status_code in (400, 422):
+            log.warning("patient_lab_results %d body=%s", resp.status_code, resp.text[:800])
+        return {"success": False, "status_code": resp.status_code, "drchrono_id": None,
+                "error": resp.text[:1000], "already_exists": False,
+                "retryable": resp.status_code >= 500}
+    except Exception as e:
+        return {"success": False, "status_code": 0, "drchrono_id": None,
+                "error": str(e), "already_exists": False}
+    finally:
+        time.sleep(0.3)
+
+
+def _push_observation_lab_result(record: dict, key: str, token: str,
+                                 doctor_id: Optional[int], patient_id: Optional[int]) -> dict:
+    """Route an observation / observation-note row to /api/patient_lab_results.
+
+    Observations are the base, enriched with their matching note via the run index.
+    Observation-note rows only reach here when observations are NOT being pushed (the
+    push loop skips them otherwise), so here they map standalone to the same payload.
+    """
+    if key in ("observation", "observations"):
+        note = _OBS_NOTE_INDEX.get(str(record.get("observation_id") or "").strip())
+        return _push_lab_result(_build_lab_result_payload(record, note, doctor_id, patient_id), token)
+    # observation_note(s) standalone (numeric value fields empty).
+    return _push_lab_result(_build_lab_result_payload({}, record, doctor_id, patient_id), token)
+
+
 def _simulate_push(records: list, resource: str) -> dict:
     if not records:
         return {"total": 0, "successful": 0, "failed": 0}
@@ -2439,10 +2955,12 @@ def _live_push_record(
             record, token, doctor_id=doctor_id, patient_id=patient_id
         )
 
-    # Clinical notes are pushed as generated PDFs to /api/documents. The records
-    # arriving here are note-level (aggregated from section rows in generate()).
+    # Clinical notes are pushed to DrChrono /api/yellow_notepad (template 7520906),
+    # with vitals + CC/HPI/Assessment/Plan as the note content. The records arriving
+    # here are note-level (aggregated in generate()), and the appointment_id is
+    # resolved from appointments pushed earlier in the same run.
     if key in ("clinical_note", "clinical_notes"):
-        return _upload_clinical_note_as_document(
+        return _push_clinical_note_yellow_notepad(
             record, token, doctor_id=doctor_id, patient_id=patient_id
         )
 
@@ -2451,12 +2969,11 @@ def _live_push_record(
     if key in ("coverage", "coverages"):
         return _upload_coverage(record, token, doctor_id=doctor_id, patient_id=patient_id)
 
-    # Observations (labs/vitals) and observation notes are pushed as a per-encounter
-    # PDF to /api/documents. /api/clinical_note_field_values needs template-bound
-    # field PKs + an appointment, which raw observation data can't supply.
+    # Observations + observation notes are pushed to /api/patient_lab_results as
+    # structured lab results (one per observation, enriched with its matching note).
     if key in ("observation", "observations", "observation_note", "observation_notes"):
-        return _upload_observation_as_document(
-            record, token, doctor_id=doctor_id, patient_id=patient_id
+        return _push_observation_lab_result(
+            record, key, token, doctor_id=doctor_id, patient_id=patient_id
         )
 
     patient_optional_keys = {"clinical_note", "clinical_notes"}
@@ -2741,16 +3258,21 @@ async def push_run(req: PushRequest):
 
     stats = {}
     current_patient_id = req.patient_id
+    # _APPT_ID_MAP persists across runs in this process so notes can resolve
+    # appointments pushed in an earlier run; a live DrChrono lookup is the fallback.
+    _prepare_obs_lab_index(source, ordered)  # index notes; decide merge vs standalone
 
     for key in ordered:
         records = source.get(key, [])
 
         if not records:
             continue
+        # When observations are also being pushed, their notes are merged in — don't
+        # push observation_notes separately (avoids the duplicate set of API calls).
+        if key in ("observation_note", "observation_notes") and _OBS_HAS_OBS["value"]:
+            continue
         if key in ("clinical_note", "clinical_notes"):
             records = _aggregate_clinical_notes(records)
-        if key in ("observation", "observations", "observation_note", "observation_notes"):
-            records = _aggregate_observations(records)
 
         if req.dry_run:
             stats[key] = _simulate_push(records, key)
@@ -2771,6 +3293,7 @@ async def push_run(req: PushRequest):
                 doctor_id=doctor_id,
                 patient_id=current_patient_id,
             )
+            _remember_appointment_id(key, record, result)
 
             if result.get("already_exists"):
                 already_exists_count += 1
@@ -2866,22 +3389,26 @@ def push_run_stream(req: PushRequest):
     ordered = [k for k in _PUSH_ORDER if k in target_keys]
     ordered += [k for k in target_keys if k not in ordered]
 
+    _prepare_obs_lab_index(source, ordered)  # index notes; decide merge vs standalone
+
     def generate():
         stats: dict[str, dict] = {}
         current_patient_id = req.patient_id
         already_exists_total = 0
+        # _APPT_ID_MAP persists across runs (see push_run); live lookup is the fallback.
 
         for key in ordered:
             records = source.get(key, [])
             if not records:
                 continue
+            # Notes are merged into observations when both are pushed — skip the
+            # separate observation_notes pass so the count isn't doubled.
+            if key in ("observation_note", "observation_notes") and _OBS_HAS_OBS["value"]:
+                continue
             # Collapse clinical-note section rows into one record per note so each
             # note becomes a single PDF document instead of one per section.
             if key in ("clinical_note", "clinical_notes"):
                 records = _aggregate_clinical_notes(records)
-            # Collapse observation rows into one record per encounter.
-            if key in ("observation", "observations", "observation_note", "observation_notes"):
-                records = _aggregate_observations(records)
 
             total = successful = failed = already_exists_count = 0
             errors: list[str] = []
@@ -2905,6 +3432,7 @@ def push_run_stream(req: PushRequest):
                         record, key, token,
                         doctor_id=doctor_id, patient_id=current_patient_id,
                     )
+                    _remember_appointment_id(key, record, result)
 
                 latency_ms = int((time.time() - t0) * 1000)
 
