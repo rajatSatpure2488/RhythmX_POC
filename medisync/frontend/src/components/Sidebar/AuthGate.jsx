@@ -2,10 +2,13 @@ import { useState } from 'react'
 import { useAuth } from '../../context/AuthContext'
 
 export default function AuthGate() {
-  const { auth, initiateOAuth, setManualToken, enterDevMode } = useAuth()
+  const { auth, initiateOAuth, setManualToken, loginWithPassword, enterDevMode } = useAuth()
   const [showManual, setShowManual] = useState(false)
+  const [showLogin, setShowLogin]   = useState(false)
   const [token, setToken]     = useState('')
   const [docId, setDocId]     = useState('')
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
   const [error, setError]     = useState(null)
   const [loading, setLoading] = useState(false)
 
@@ -24,6 +27,16 @@ export default function AuthGate() {
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleLogin = (e) => {
+    e.preventDefault()
+    // DrChrono does not allow apps to sign users in with a raw username/password.
+    // Send the user to DrChrono's own secure login page instead, where they sign in
+    // as that specific person and their assigned role/permissions are applied.
+    setError(null)
+    setLoading(true)
+    initiateOAuth()
   }
 
   return (
@@ -63,7 +76,7 @@ export default function AuthGate() {
         )}
 
         {/* Primary OAuth button */}
-        {!showManual && (
+        {!showManual && !showLogin && (
           <>
             <button
               id="btn-oauth-connect"
@@ -97,9 +110,18 @@ export default function AuthGate() {
             <div className="section-sep" style={{ margin: '20px 0' }}>or</div>
 
             <button
+              id="btn-show-login"
+              className="auth-gate__manual-link"
+              onClick={() => { setShowLogin(true); setError(null) }}
+            >
+              Sign in with username &amp; password →
+            </button>
+
+            <button
               id="btn-show-manual"
               className="auth-gate__manual-link"
-              onClick={() => setShowManual(true)}
+              style={{ marginTop: 8 }}
+              onClick={() => { setShowManual(true); setError(null) }}
             >
               Use a manual access token instead →
             </button>
@@ -127,6 +149,53 @@ export default function AuthGate() {
               </p>
             </div>
           </>
+        )}
+
+        {/* Username + password sign-in — DrChrono requires this on their own secure
+            page, so we route to the DrChrono login (the typed username is just a hint). */}
+        {showLogin && (
+          <form onSubmit={handleLogin} className="auth-gate__manual-form">
+            <div style={{
+              background: '#EFF6FF', border: '1px solid #BFDBFE', borderRadius: 8,
+              padding: '10px 12px', marginBottom: 14, fontSize: '0.75rem',
+              color: '#1E40AF', lineHeight: 1.5,
+            }}>
+              For security, DrChrono signs users in on their own page — apps can't
+              accept passwords directly. Click below to sign in as that user; their
+              assigned role &amp; permissions are applied automatically.
+            </div>
+            <div className="form-group">
+              <label className="form-label" htmlFor="gate-username">DrChrono Username <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(optional)</span></label>
+              <input
+                id="gate-username"
+                className="form-input"
+                type="text"
+                placeholder="DrChrono username or email"
+                value={username}
+                onChange={e => setUsername(e.target.value)}
+                autoComplete="username"
+              />
+            </div>
+            {error && (
+              <p style={{ color: 'var(--danger)', fontSize: '0.75rem', marginBottom: 10 }}>{error}</p>
+            )}
+            <button
+              id="btn-login-connect"
+              type="submit"
+              className="auth-gate__oauth-btn"
+              disabled={loading}
+            >
+              {loading ? 'Redirecting…' : 'Continue to DrChrono sign-in →'}
+            </button>
+            <button
+              type="button"
+              className="auth-gate__manual-link"
+              style={{ marginTop: 10 }}
+              onClick={() => { setShowLogin(false); setError(null) }}
+            >
+              ← Back
+            </button>
+          </form>
         )}
 
         {/* Manual token fallback */}

@@ -34,7 +34,7 @@ log = logging.getLogger("medisync.auth")
 DRCHRONO_SCOPES = (
     "user:read patients:read patients:write "
     "clinical:read clinical:write calendar:read calendar:write "
-    "labs:read labs:write"
+    "labs:read labs:write billing:read billing:write"
 )
 
 

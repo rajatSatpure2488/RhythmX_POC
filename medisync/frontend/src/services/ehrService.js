@@ -13,6 +13,9 @@ export const getAuthStatus = () =>
 export const setManualTokenAPI = (access_token, doctor_id) =>
   api.post('/auth/manual', { access_token, doctor_id }).then(r => r.data)
 
+export const loginWithPasswordAPI = (username, password) =>
+  api.post('/auth/login', { username, password }).then(r => r.data)
+
 export const refreshTokenAPI = () =>
   api.post('/auth/refresh').then(r => r.data)
 

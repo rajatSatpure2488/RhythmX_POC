@@ -27,24 +27,47 @@ const DRCHRONO_ENDPOINTS = {
   medications:          'POST /api/medications',
   conditions:           'POST /api/problems',
   encounters:           'POST /api/appointments',
-  observations:         'POST /api/clinical_note_field_values',
+  observations:         'POST /api/patient_lab_results',
+  observation_notes:    'POST /api/patient_lab_results',
   allergies:            'POST /api/allergies',
   immunizations:        'POST /api/patient_vaccine_records',
   procedures:           'POST /api/procedures',
   patient:              'POST /api/patients',
   documents:            'POST /api/documents (multipart)',
   document_reference:   'POST /api/documents (multipart)',
-  clinical_notes:       'POST /api/clinical_notes',
-  coverages:            'POST /api/patient_insurances',
+  clinical_notes:       'PATCH /api/appointments + POST /api/yellow_notepad',
+  coverages:            'POST /api/insurances',
+}
+
+// Parse DrChrono's "field: message | field2: message2" error string into
+// structured rows so the UI can show exactly WHICH field failed and WHY,
+// instead of a generic guessed hint.
+function parseFieldErrors(detail) {
+  if (!detail) return []
+  return String(detail)
+    .split(' | ')
+    .map(seg => {
+      const i = seg.indexOf(':')
+      if (i > 0 && i < 40) {
+        return { field: seg.slice(0, i).trim(), message: seg.slice(i + 1).trim() }
+      }
+      return { field: null, message: seg.trim() }
+    })
+    .filter(e => e.message)
 }
 
 function LogEntry({ entry }) {
   const [open, setOpen] = useState(false)
+  const fieldErrors = !entry.success && !entry.already_exists ? parseFieldErrors(entry.detail) : []
+  // Short, scannable summary for the one-line row: the failed field name(s).
+  const failSummary = fieldErrors.length
+    ? fieldErrors.map(e => e.field).filter(Boolean).join(', ') || entry.error
+    : entry.error
   const statusColor = entry.already_exists ? '#d97706'
     : entry.success ? '#16a34a' : '#dc2626'
   const statusLabel = entry.already_exists
     ? `⟳ ${entry.httpStatus} Already Exists`
-    : entry.success ? `✓ ${entry.httpStatus} Created` : `✗ ${entry.httpStatus} ${entry.error}`
+    : entry.success ? `✓ ${entry.httpStatus} Created` : `✗ ${entry.httpStatus} ${failSummary}`
   return (
     <div className={`push-log-entry ${entry.success ? '' : 'push-log-entry--fail'} ${entry.already_exists ? 'push-log-entry--exists' : ''}`}>
       <div className="push-log-entry__main" onClick={() => !entry.success && !entry.already_exists && setOpen(o => !o)} style={{ cursor: (!entry.success && !entry.already_exists) ? 'pointer' : 'default' }}>
@@ -61,12 +84,46 @@ function LogEntry({ entry }) {
         <div className="push-log-entry__detail">
           <div><strong>Record ID:</strong> <code>{entry.recordId}</code></div>
           <div><strong>Endpoint:</strong> <code>{entry.endpoint}</code></div>
-          <div><strong>HTTP Status:</strong> <span className="err-tag err-tag--null">{entry.httpStatus}</span></div>
-          <div><strong>Error Type:</strong> <span className={`err-tag ${entry.httpStatus === 422 ? 'err-tag--null' : entry.httpStatus === 400 ? 'err-tag--date' : 'err-tag--term'}`}>{entry.error}</span></div>
-          <div><strong>Detail:</strong> {entry.detail}</div>
+          <div>
+            <strong>HTTP Status:</strong> <span className="err-tag err-tag--null">{entry.httpStatus}</span>
+            {' '}
+            <span
+              className={`err-tag ${entry.retryable ? 'err-tag--term' : 'err-tag--null'}`}
+              title={entry.retryable
+                ? 'Transient failure — retrying may succeed.'
+                : 'Deterministic validation failure — retrying the same data will fail again.'}
+            >
+              {entry.retryable ? '↺ Retryable' : '⛔ Validation — won’t retry'}
+            </span>
+          </div>
+
+          {/* Real DrChrono per-field errors — what actually failed and why */}
+          {fieldErrors.length > 0 ? (
+            <div style={{ marginTop: 8 }}>
+              <strong>DrChrono rejected these fields:</strong>
+              <ul className="push-log-field-errors" style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+                {fieldErrors.map((fe, i) => (
+                  <li key={i} style={{ marginBottom: 2 }}>
+                    {fe.field && (
+                      <code className="err-tag err-tag--date" style={{ marginRight: 6 }}>{fe.field}</code>
+                    )}
+                    <span>{fe.message}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <div style={{ marginTop: 6 }}><strong>Detail:</strong> {entry.detail}</div>
+          )}
+
           <div style={{ marginTop: 8 }}>
             <strong>Suggested Fix:</strong>
             <div className="push-log-debug-hint">
+              {fieldErrors.some(fe => fe.field === 'scheduled_time' && /century|2000/i.test(fe.message)) && (
+                '📅 This appointment is dated before the year 2000. DrChrono only accepts ' +
+                'appointment dates in 2000–2099. Either exclude pre-2000 visits or shift the date ' +
+                'into the supported range before pushing.'
+              )}
               {(entry.httpStatus === 0) && (
                 '⚠ Backend returned an unexpected error (500). Most likely cause: data session expired. ' +
                 'Re-upload your CSV/FHIR file in the Ingestion stage, then push again. ' +
@@ -170,64 +227,90 @@ export default function EHRPush() {
       }
 
       const doctorId = auth.doctorId ? parseInt(auth.doctorId, 10) : undefined
-      const resp = await api.post('/push/run', {
-        resources: selectedKeys,
-        dry_run: false,
-        ...(doctorId && { doctor_id: doctorId }),
-      }, { timeout: 120000 })
 
-      const data = resp.data
-      const ts = new Date().toLocaleTimeString('en-US', { hour:'2-digit', minute:'2-digit', second:'2-digit' })
+      // api.defaults.baseURL is '/' so the Vite proxy can route to :8000.
+      // Concatenating '/' + '/push/...' would yield '//push/...', a protocol-
+      // relative URL the browser resolves to host "push" → "Failed to fetch".
+      // Normalise to a clean relative path (or absolute base if overridden).
+      const rawBase = (api.defaults && api.defaults.baseURL) || ''
+      const baseURL = rawBase === '/' ? '' : rawBase.replace(/\/$/, '')
+      const resp = await fetch(`${baseURL}/push/run-stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          resources: selectedKeys,
+          dry_run: false,
+          ...(doctorId && { doctor_id: doctorId }),
+        }),
+      })
 
-      for (const key of selectedKeys) {
-        const stat = data.stats?.[key]
-        if (!stat) continue
-        const endpoint = DRCHRONO_ENDPOINTS[key] || `POST /api/${key}`
-        const recs = resources[key] || []
+      if (!resp.ok) {
+        const text = await resp.text().catch(() => '')
+        const err = new Error(text || `HTTP ${resp.status}`)
+        err.response = { status: resp.status }
+        throw err
+      }
 
-        for (let i = 0; i < (stat.successful || 0); i++) {
-          const isExisting = i < (stat.already_exists || 0)
-          const rec = recs[i] || {}
-          addPushLogEntry({
-            ts,
-            resource:       key,
-            recordId:       rec.id || rec.patient_id || `${key.toUpperCase()}-${i+1}`,
-            endpoint,
-            httpStatus:     isExisting ? 200 : 201,
-            success:        true,
-            already_exists: isExisting,
-            error:          null,
-            detail:         isExisting ? `Patient already exists in DrChrono — no duplicate created. ID used for child resources.` : null,
-            latency:        Math.floor(100 + Math.random() * 300),
-          })
-          passed++
-          recordCall()
-        }
+      const reader = resp.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let alreadyExists = 0
+      let lastSummary = null
 
-        const errs = stat.errors || []
-        for (let i = 0; i < (stat.failed || 0); i++) {
-          const rec = recs[(stat.successful || 0) + i] || {}
-          addPushLogEntry({
-            ts,
-            resource:   key,
-            recordId:   rec.id || rec.patient_id || `${key.toUpperCase()}-ERR-${i+1}`,
-            endpoint,
-            httpStatus: 400,
-            success:    false,
-            error:      'DrChrono Error',
-            detail:     errs[i] || 'See backend logs for details',
-            latency:    Math.floor(100 + Math.random() * 300),
-          })
-          failed++
-          recordCall()
+      while (true) {
+        const { value, done: streamDone } = await reader.read()
+        if (streamDone) break
+        buffer += decoder.decode(value, { stream: true })
+
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+          if (!line.trim()) continue
+          let evt
+          try { evt = JSON.parse(line) } catch { continue }
+
+          if (evt.type === 'record') {
+            const ts = new Date().toLocaleTimeString('en-US', { hour:'2-digit', minute:'2-digit', second:'2-digit' })
+            const endpoint = DRCHRONO_ENDPOINTS[evt.resource] || `POST /api/${evt.resource}`
+            const httpStatus = evt.status_code || (evt.success ? 201 : 400)
+            addPushLogEntry({
+              ts,
+              resource:       evt.resource,
+              recordId:       evt.record_id,
+              endpoint,
+              httpStatus,
+              success:        evt.success,
+              already_exists: evt.already_exists,
+              error:          evt.success ? null : (evt.error || 'DrChrono Error'),
+              detail:         evt.already_exists
+                                ? 'Already exists in DrChrono — no duplicate created.'
+                                : (evt.error || null),
+              retryable:      evt.success ? false : !!evt.retryable,
+              latency:        evt.latency_ms || 0,
+            })
+            recordCall()
+            if (evt.already_exists) alreadyExists++
+            if (evt.success) passed++; else failed++
+          } else if (evt.type === 'summary') {
+            lastSummary = evt
+          }
         }
       }
 
+      // Flush any trailing buffered line (rare)
+      if (buffer.trim()) {
+        try {
+          const evt = JSON.parse(buffer)
+          if (evt.type === 'summary') lastSummary = evt
+        } catch { /* ignore */ }
+      }
+
       setPushSummary({
-        total: passed + failed,
-        successful: passed,
-        failed,
-        already_exists: selectedKeys.reduce((n, k) => n + (data.stats?.[k]?.already_exists || 0), 0),
+        total:          lastSummary?.total ?? (passed + failed),
+        successful:     lastSummary?.successful ?? passed,
+        failed:         lastSummary?.failed ?? failed,
+        already_exists: lastSummary?.already_exists ?? alreadyExists,
       })
 
     } catch (err) {
@@ -264,6 +347,8 @@ export default function EHRPush() {
 
   const vd = validationResults?.details || {}
   const failedEntries = pushLog.filter(e => !e.success)
+  const retryableFailCount   = failedEntries.filter(e => e.retryable).length
+  const validationFailCount  = failedEntries.length - retryableFailCount
 
   return (
     <div className="push-select-page">
@@ -406,9 +491,19 @@ export default function EHRPush() {
               <div className="push-log-fail-table">
                 <div className="vld-debug-table-header">
                   <span className="vld-debug-table-title">
-                    ⚠ {failedEntries.length} Failed — click a row above for details
+                    ⚠ {failedEntries.length} Failed
+                    {validationFailCount > 0 && ` · ${validationFailCount} validation`}
+                    {retryableFailCount > 0 && ` · ${retryableFailCount} retryable`}
+                    {' '}— click a row above for details
                   </span>
-                  <button className="btn btn--ghost btn--sm" onClick={handlePush}>↺ Retry</button>
+                  <button
+                    className="btn btn--ghost btn--sm"
+                    onClick={handlePush}
+                    disabled={retryableFailCount === 0}
+                    title={retryableFailCount === 0
+                      ? 'All failures are validation errors — fix the source data and re-push.'
+                      : 'Retry the push.'}
+                  >↺ Retry</button>
                 </div>
                 <div style={{ overflowX: 'auto' }}>
                   <table className="vld-debug-table">
@@ -417,20 +512,32 @@ export default function EHRPush() {
                         <th>RECORD ID</th>
                         <th>RESOURCE</th>
                         <th>HTTP</th>
+                        <th>TYPE</th>
                         <th>ERROR</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {failedEntries.map((e, i) => (
-                        <tr key={i}>
-                          <td className="vld-record-id">{e.recordId}</td>
-                          <td>{TAB_LABELS[e.resource] || e.resource}</td>
-                          <td><span className="err-tag err-tag--null">{e.httpStatus}</span></td>
-                          <td className="vld-debug-detail" style={{ maxWidth: 200, wordBreak: 'break-word' }}>
-                            {e.error} — {e.detail}
-                          </td>
-                        </tr>
-                      ))}
+                      {failedEntries.map((e, i) => {
+                        const fes = parseFieldErrors(e.detail)
+                        const msg = fes.length
+                          ? fes.map(fe => fe.field ? `${fe.field}: ${fe.message}` : fe.message).join(' · ')
+                          : (e.detail || e.error)
+                        return (
+                          <tr key={i}>
+                            <td className="vld-record-id">{e.recordId}</td>
+                            <td>{TAB_LABELS[e.resource] || e.resource}</td>
+                            <td><span className="err-tag err-tag--null">{e.httpStatus}</span></td>
+                            <td>
+                              <span className={`err-tag ${e.retryable ? 'err-tag--term' : 'err-tag--null'}`}>
+                                {e.retryable ? '↺ Retryable' : '⛔ Validation'}
+                              </span>
+                            </td>
+                            <td className="vld-debug-detail" style={{ maxWidth: 240, wordBreak: 'break-word' }}>
+                              {msg}
+                            </td>
+                          </tr>
+                        )
+                      })}
                     </tbody>
                   </table>
                 </div>

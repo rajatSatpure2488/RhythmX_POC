@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react'
-import { getAuthStatus, initiateOAuthFlow, setManualTokenAPI, exchangeCode } from '../services/ehrService'
+import { getAuthStatus, initiateOAuthFlow, setManualTokenAPI, exchangeCode, loginWithPasswordAPI } from '../services/ehrService'
 
 const AuthContext = createContext(null)
 
@@ -154,6 +154,21 @@ export function AuthProvider({ children }) {
     }
   }
 
+  const loginWithPassword = async (username, password) => {
+    setAuth(prev => ({ ...prev, status: 'connecting', error: null }))
+    try {
+      const data = await loginWithPasswordAPI(username, password)
+      setAuth(prev => ({
+        ...prev, connected: true,
+        doctorId: data.doctor_id, doctorName: data.doctor_name,
+        expiresIn: data.expires_in, status: 'connected', error: null,
+      }))
+    } catch (err) {
+      setAuth(prev => ({ ...prev, status: 'error', error: err.message }))
+      throw err
+    }
+  }
+
   const enterDevMode = () => {
     setAuth({
       connected: true, accessToken: 'DEV_MODE_TOKEN', refreshToken: null,
@@ -172,7 +187,7 @@ export function AuthProvider({ children }) {
   }
 
   return (
-    <AuthContext.Provider value={{ auth, initiateOAuth, setManualToken, enterDevMode, logout, syncStatus }}>
+    <AuthContext.Provider value={{ auth, initiateOAuth, setManualToken, loginWithPassword, enterDevMode, logout, syncStatus }}>
       {children}
     </AuthContext.Provider>
   )

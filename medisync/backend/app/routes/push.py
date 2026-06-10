@@ -959,10 +959,10 @@ ENDPOINT_MAP = {
     "diagnostic_reports": "documents",
     "report": "documents",
     "reports": "documents",
-    "observation": "documents",
-    "observations": "documents",
-    "observation_note": "documents",
-    "observation_notes": "documents",
+    "observation": "patient_lab_results",
+    "observations": "patient_lab_results",
+    "observation_note": "patient_lab_results",
+    "observation_notes": "patient_lab_results",
     "procedure": "clinical_note_section_field_values",
     "procedures": "clinical_note_section_field_values",
     "service_request": "lab_orders",
@@ -973,8 +973,8 @@ ENDPOINT_MAP = {
     "documents": "documents",
     "document_reference": "documents",
     "document_references": "documents",
-    "clinical_note": "clinical_note_field_values",
-    "clinical_notes": "clinical_note_field_values",
+    "clinical_note": "yellow_notepad",
+    "clinical_notes": "yellow_notepad",
 }
 
 # DrChrono accepts only Male / Female / Other (NOT "Unknown" — it 400s).

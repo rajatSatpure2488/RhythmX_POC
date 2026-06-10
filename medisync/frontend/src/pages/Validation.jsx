@@ -34,26 +34,26 @@ const DRCHRONO_ENDPOINTS = {
   conditions:           { method:'POST',  path:'/api/problems',                     note:'Requires patient_id' },
   problems:             { method:'POST',  path:'/api/problems',                     note:'Requires patient_id' },
   encounters:           { method:'POST',  path:'/api/appointments',                 note:'Requires doctor_id + patient_id' },
-  observations:         { method:'POST',  path:'/api/clinical_note_field_values',    note:'Requires appointment_id' },
+  observations:         { method:'POST',  path:'/api/patient_lab_results',          note:'Structured lab result per observation (joined with notes)' },
   allergies:            { method:'POST',  path:'/api/allergies',                    note:'Requires patient_id' },
   immunizations:        { method:'POST',  path:'/api/patient_vaccine_records',      note:'Requires patient_id' },
   procedures:           { method:'POST',  path:'/api/procedures',                  note:'Requires patient_id' },
   documents:            { method:'POST',  path:'/api/documents',                   note:'Multipart file upload (PDF, JPG, etc.)' },
   document_reference:   { method:'POST',  path:'/api/documents',                   note:'Multipart file upload from FHIR DocumentReference' },
   document_references:  { method:'POST',  path:'/api/documents',                   note:'Multipart file upload from FHIR DocumentReference' },
-  clinical_notes:       { method:'POST',  path:'/api/clinical_notes',              note:'Clinical note text fields' },
-  coverages:            { method:'POST',  path:'/api/patient_insurances',           note:'Requires patient_id' },
+  clinical_notes:       { method:'POST',  path:'/api/yellow_notepad',              note:'Vitals -> PATCH /api/appointments, then note -> yellow_notepad (template 7520906)' },
+  coverages:            { method:'POST',  path:'/api/insurances',                    note:'Insurance type primary/secondary' },
   appointments:         { method:'POST',  path:'/api/appointments',                 note:'Requires doctor_id' },
   diagnostic_reports:   { method:'POST',  path:'/api/documents',                   note:'Binary upload supported' },
-  observation_notes:    { method:'POST',  path:'/api/clinical_note_field_values',    note:'Linked to appointment' },
+  observation_notes:    { method:'POST',  path:'/api/patient_lab_results',          note:'Merged into observations (or standalone lab result if pushed alone)' },
 }
 
 const REQUIRED = {
   medications:          ['name','dosage','status'],
   conditions:           ['code','status','patient_id'],
   problems:             ['code','status','patient_id'],
-  encounters:           ['type','date','patient_id'],
-  observations:         ['code','value','effective_date','patient_id'],
+  encounters:           ['date'],   // pushed as appointments; date = scheduled_time
+  observations:         ['patient_id'],   // labs (value) or pivoted vitals; share patient link
   allergies:            ['substance','status','patient_id'],
   immunizations:        ['vaccine_code','date','patient_id'],
   procedures:           ['code','performed_date','patient_id'],
@@ -62,10 +62,10 @@ const REQUIRED = {
   documents:            ['patient','description','document'],
   document_reference:   ['patient','description','document'],
   document_references:  ['patient','description','document'],
-  clinical_notes:       ['notes','patient_id'],
-  coverages:            ['payer','status','patient_id'],
-  appointments:         ['date','doctor_id'],
-  observation_notes:    ['observation_code','value'],
+  clinical_notes:       ['note_id'],   // base + sections files share the note link
+  coverages:            ['insurance_company','patient_id'],   // status is dropped in transform
+  appointments:         ['date'],
+  observation_notes:    ['patient_id'],   // pushed as a per-encounter PDF document
 }
 
 // Troubleshooting guide per error type + resource
@@ -103,6 +103,10 @@ const FIELD_ALIASES = {
   'patient':      ['patient', 'patientid', 'memberid'],
   'document':     ['document', 'filepath', 'filename', 'localpath', 'documentpath', 'filecontent', 'data', 'attachmentdata'],
   'description':  ['description', 'name', 'namefull', 'title', 'label'],
+  'date':         ['date', 'scheduledtime', 'datereport', 'documentdate', 'effectivedt', 'appointmentdate'],
+  'noteid':       ['noteid', 'sourcenoteid'],
+  // Insurer name arrives as insurance_company (transformed) or payor_name (raw).
+  'insurancecompany': ['insurancecompany', 'payorname', 'payername', 'insurer', 'payer'],
 }
 
 // Normalize a field key: lowercase, remove underscores/spaces/hyphens AND camelCase humps
@@ -133,10 +137,21 @@ function resolveValue(val) {
 }
 
 
+// Required-field defaults that mirror backend pusher behavior (e.g.
+// _condition_status defaults to "Active"). Without these, the dry-run flags
+// rows that DrChrono would happily accept.
+const REQUIRED_DEFAULTS = {
+  conditions: { status: 'active' },
+  problems:   { status: 'active' },
+  allergies:  { status: 'active' },
+  medications:{ status: 'active' },
+}
+
 function auditRecord(rec, resourceKey) {
   const errors = []
   const reqFields = REQUIRED[resourceKey] || []
   const allFields = Object.keys(rec)
+  const defaults = REQUIRED_DEFAULTS[resourceKey] || {}
 
   for (const rf of reqFields) {
     const rfNorm = normalizeKey(rf)
@@ -150,6 +165,7 @@ function auditRecord(rec, resourceKey) {
     const rawVal = matchKey !== undefined ? rec[matchKey] : undefined
     const val = resolveValue(rawVal)  // unwrap FHIR arrays
     if (val === null || val === undefined || val === '') {
+      if (defaults[rf] !== undefined) continue  // backend will fill this in
       errors.push({ field: matchKey || rf, type:'null_value', tag:'Null value', cls:'err-tag--null',
         detail:`Required field '${rf}' is null or missing.` })
     }
@@ -164,10 +180,17 @@ function auditRecord(rec, resourceKey) {
         const isIsoDatetime = /^\d{4}-\d{2}-\d{2}T/.test(val)
         const isIsoDate     = /^\d{4}-\d{2}-\d{2}$/.test(val)
         const isShortDate   = SHORT_DATE.test(val)
-        // Only flag if it matches the bad short-date pattern AND is NOT already ISO
+        // DD-MM-YYYY / MM-DD-YYYY short dates are auto-normalized to YYYY-MM-DD on
+        // push, so only flag them if the numbers can't form a real calendar date.
         if (!isIsoDatetime && !isIsoDate && isShortDate) {
-          errors.push({ field: f, type:'date_format', tag:'Bad date', cls:'err-tag--date',
-            detail:`'${f}' must be YYYY-MM-DD. Got: '${val.slice(0,20)}'` })
+          const [a, b] = val.split(/[/.\-]/).map(Number)
+          const day = a > 12 ? a : (b > 12 ? b : a)
+          const month = a > 12 ? b : (b > 12 ? a : b)
+          const validCal = month >= 1 && month <= 12 && day >= 1 && day <= 31
+          if (!validCal) {
+            errors.push({ field: f, type:'date_format', tag:'Bad date', cls:'err-tag--date',
+              detail:`'${f}' is not a valid date. Got: '${val.slice(0,20)}'` })
+          }
         }
       }
     }

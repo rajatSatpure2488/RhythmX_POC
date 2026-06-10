@@ -10,6 +10,7 @@ const TAB_LABELS = {
   conditions:'Conditions', condition:'Conditions',
   problems:'Conditions', problem:'Conditions', problem_list:'Conditions',
   encounters:'Encounters', encounter:'Encounters',
+  appointments:'Appointments', appointment:'Appointments',
   observations:'Observations', observation:'Observations',
   allergies:'Allergies', allergy:'Allergies',
   immunizations:'Immunizations', immunization:'Immunizations',
@@ -27,16 +28,26 @@ const FHIR_SCHEMA = {
   medications:   { required:['name','dosage','status'], optional:['route','frequency','authored_on','prescriber','patient_id'] },
   conditions:    { required:['code','clinical_status','patient_id'], optional:['onset_date','severity','note'] },
   problems:      { required:['code','clinical_status','patient_id'], optional:['onset_date','severity','note'] },
-  encounters:    { required:['type','period','patient_id'], optional:['participant','reason','provider'] },
-  observations:  { required:['code','value','effective_date','patient_id'], optional:['unit','status','category'] },
+  // DrChrono has no encounters endpoint — encounters are pushed as appointments,
+  // so validate them with the appointment shape (date = scheduled_time).
+  encounters:    { required:['date'], optional:['duration','status','reason','type','exam_room','office','patient_id','period','provider','participant'] },
+  appointments:  { required:['date'], optional:['duration','status','reason','type','exam_room','office'] },
+  appointment:   { required:['date'], optional:['duration','status','reason','type','exam_room','office'] },
+  // Transformed observations come as lab results (value/test_name/date_collected)
+  // or pivoted vitals (bp_s, pulse, ...). Both share the patient link.
+  observations:  { required:['patient_id'], optional:['value','test_name','units','date_collected','abnormal_status','bp_s','bp_d','pulse','respiratory_rate','temperature','weight','height','oxygen_saturation','bmi','encounter_id','doctor','code','effective_date'] },
   allergies:     { required:['substance','status','patient_id'], optional:['severity','reaction','onset'] },
   immunizations: { required:['vaccine_code','date','patient_id'], optional:['dose','manufacturer','status'] },
   procedures:    { required:['code','performed','patient_id'], optional:['performer','outcome','status'] },
   patient:       { required:['name','birth_date','gender'], optional:['id','address','phone','email'] },
   documents:     { required:['patient','description','document'], optional:['doctor','date','metatags','archived','filename','mime_type'] },
   document_reference: { required:['patient','description','document'], optional:['doctor','date','metatags','archived','filename','mime_type'] },
-  clinical_notes:{ required:['notes','patient_id'], optional:['clinical_note_date','doctor'] },
-  coverages:     { required:['payer','status','patient_id'], optional:['plan','group','member_id'] },
+  // Transformed clinical notes are split into a base file (join keys + doctor +
+  // appointment) and a melted sections file (section_name + value). Both share the
+  // note linkage, so note_id is the real requirement; everything else is optional.
+  clinical_notes:{ required:['note_id'], optional:['patient_id','encounter_id','section_name','value','appointment','doctor','notes','clinical_note_date'] },
+  // Transformed coverages drop status; key fields are the insurer + patient link.
+  coverages:     { required:['insurance_company','patient_id'], optional:['payer_id','insurance_group_number','insurance_id_number','insurance_plan_type','insurance_plan_name','doctor','plan','group','member_id'] },
 }
 
 const DRCHRONO_ENDPOINTS = {
@@ -44,7 +55,19 @@ const DRCHRONO_ENDPOINTS = {
   conditions:           'POST /api/problems',
   problems:             'POST /api/problems',
   encounters:           'POST /api/appointments',
-  observations:         'POST /api/clinical_note_field_values',
+  appointments:         'POST /api/appointments',
+  appointment:          'POST /api/appointments',
+  observations:         'POST /api/patient_lab_results',
+  observation:          'POST /api/patient_lab_results',
+  observation_notes:    'POST /api/patient_lab_results',
+  observation_note:     'POST /api/patient_lab_results',
+  diagnostic_report:    'POST /api/documents (PDF)',
+  diagnostic_reports:   'POST /api/documents (PDF)',
+  report:               'POST /api/documents (PDF)',
+  reports:              'POST /api/documents (PDF)',
+  service_request:      'POST /api/lab_orders',
+  service_requests:     'POST /api/lab_orders',
+  servicerequests:      'POST /api/lab_orders',
   allergies:            'POST /api/allergies',
   immunizations:        'POST /api/patient_vaccine_records',
   procedures:           'POST /api/procedures',
@@ -53,8 +76,9 @@ const DRCHRONO_ENDPOINTS = {
   documents:            'POST /api/documents (multipart)',
   document_reference:   'POST /api/documents (multipart)',
   document_references:  'POST /api/documents (multipart)',
-  clinical_notes:       'POST /api/clinical_notes',
-  coverages:            'POST /api/patient_insurances',
+  clinical_notes:       'PATCH /api/appointments + POST /api/yellow_notepad',
+  clinical_note:        'PATCH /api/appointments + POST /api/yellow_notepad',
+  coverages:            'POST /api/insurances',
 }
 
 // ── Field name normalizer (camelCase-aware) ──────────────────────
@@ -79,6 +103,11 @@ const FIELD_ALIASES = {
   'patient':    ['patient', 'patientid', 'memberid'],
   'document':   ['document', 'filepath', 'filename', 'localpath', 'documentpath', 'filecontent', 'data', 'attachmentdata'],
   'description':['description', 'name', 'namefull', 'title', 'label'],
+  // Appointment date can arrive as scheduled_time (DrChrono) or other date fields.
+  'date':       ['date', 'scheduledtime', 'datereport', 'documentdate', 'effectivedt', 'appointmentdate'],
+  'note_id':    ['noteid', 'sourcenoteid'],
+  // Insurer name arrives as insurance_company (transformed) or payor_name (raw).
+  'insurance_company': ['insurancecompany', 'payorname', 'payername', 'insurer', 'payer'],
 }
 
 // Try to match a schema field name to a source key in the record
@@ -103,7 +132,8 @@ function matchField(schemaField, srcKeys) {
   return null
 }
 
-// Extract a display value from a FHIR field (handles arrays like HumanName)
+// Extract a display value from a FHIR field (handles arrays like HumanName,
+// CodeableConcept dicts, and Reference dicts).
 function resolveValue(val) {
   if (val === null || val === undefined) return undefined
   if (Array.isArray(val)) {
@@ -115,13 +145,38 @@ function resolveValue(val) {
         const given = Array.isArray(first.given) ? first.given.join(' ') : ''
         return `${given} ${first.family || first.text || ''}`.trim()
       }
-      // FHIR CodeableConcept: { coding[], text }
+      // FHIR CodeableConcept inside an array: { coding[], text }
       if (first.text) return first.text
       if (first.display) return first.display
+      if (Array.isArray(first.coding) && first.coding[0]) {
+        return first.coding[0].code || first.coding[0].display || undefined
+      }
     }
     return String(first)
   }
+  // FHIR CodeableConcept as a single dict: { coding: [{code, display}], text }
+  if (typeof val === 'object') {
+    if (val.text) return val.text
+    if (Array.isArray(val.coding) && val.coding[0]) {
+      return val.coding[0].code || val.coding[0].display || undefined
+    }
+    // FHIR Reference: { reference: "Patient/123" } → "123"
+    if (typeof val.reference === 'string') {
+      const parts = val.reference.split('/')
+      return parts[parts.length - 1]
+    }
+  }
   return val
+}
+
+// Per-resource defaults applied when a required field is missing.
+// Mirrors what the backend pushers already do, so the FE stops gating rows
+// that DrChrono would happily accept.
+const REQUIRED_DEFAULTS = {
+  conditions: { clinical_status: 'active' },
+  problems:   { clinical_status: 'active' },
+  allergies:  { status: 'active' },
+  medications:{ status: 'active' },
 }
 
 // Determine 3-state mapping status from missing count
@@ -161,12 +216,15 @@ function mapRecord(record, resourceKey) {
   const unmappedRequired = []
 
   // Map required fields
+  const defaults = REQUIRED_DEFAULTS[resourceKey] || {}
   for (const req of schema.required) {
     const matchKey = matchField(req, srcKeys)
     const rawVal = matchKey !== undefined && matchKey !== null ? record[matchKey] : record[req]
     const val = resolveValue(rawVal)  // unwrap FHIR arrays, extract display text
     if (val !== null && val !== undefined && val !== '') {
       mappedFields[req] = val
+    } else if (defaults[req] !== undefined) {
+      mappedFields[req] = defaults[req]
     } else {
       unmappedRequired.push({ field: req, reason: 'null_value', src: matchKey || req })
     }

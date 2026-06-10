@@ -3,8 +3,92 @@
  * content area when the user navigates to "EHR Authentication" in the sidebar.
  * Shown whether already connected (status summary) or not (login form).
  */
+import { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import AuthGate from './AuthGate'
+
+/**
+ * TokenBox — fetches the live DrChrono access token from GET /auth/token and lets
+ * the user copy it (raw or as "Bearer <token>") for use in Postman / external tools.
+ * The token is masked by default and revealed on hover.
+ */
+function TokenBox() {
+  const [token, setToken]   = useState(null)
+  const [meta, setMeta]     = useState({})
+  const [error, setError]   = useState(null)
+  const [copied, setCopied] = useState('')
+  const [reveal, setReveal] = useState(false)
+
+  const load = useCallback(() => {
+    setError(null); setToken(null)
+    fetch('/auth/token')
+      .then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(e.detail || `HTTP ${r.status}`)))
+      .then(d => { setToken(d.access_token); setMeta({ doctorId: d.doctor_id, expiresIn: d.expires_in_seconds }) })
+      .catch(e => setError(typeof e === 'string' ? e : 'Could not load token'))
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  const copy = (text, label) => {
+    navigator.clipboard.writeText(text)
+      .then(() => { setCopied(label); setTimeout(() => setCopied(''), 1600) })
+      .catch(() => setError('Clipboard blocked — select the token and copy manually.'))
+  }
+
+  const labelStyle = { fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)', marginBottom: 6 }
+  const btnStyle = { fontSize: '0.74rem', fontWeight: 600, padding: '5px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--card-bg)', cursor: 'pointer', color: 'var(--text-primary)' }
+
+  return (
+    <div style={{ background: 'var(--app-bg)', borderRadius: 8, padding: '16px', marginBottom: 24, textAlign: 'left' }}>
+      <div style={{ ...labelStyle, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span>DrChrono Access Token — for Postman</span>
+        <button onClick={load} title="Refresh token" style={{ ...btnStyle, padding: '2px 8px', fontSize: '0.68rem' }}>↻</button>
+      </div>
+
+      {error && (
+        <div style={{ fontSize: '0.78rem', color: 'var(--danger)' }}>
+          {error} {error.includes('No active') || error.includes('401')
+            ? '— connect to DrChrono first.' : ''}
+        </div>
+      )}
+
+      {!error && !token && <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Loading token…</div>}
+
+      {token && (
+        <>
+          <code
+            onMouseEnter={() => setReveal(true)}
+            onMouseLeave={() => setReveal(false)}
+            onClick={() => copy(token, 'token')}
+            title="Hover to reveal · click to copy the access token"
+            style={{
+              display: 'block', wordBreak: 'break-all', fontFamily: 'monospace',
+              fontSize: '0.74rem', background: 'var(--card-bg)', border: '1px solid var(--border)',
+              borderRadius: 6, padding: '8px 10px', marginBottom: 10, cursor: 'pointer',
+              color: 'var(--text-primary)', lineHeight: 1.5,
+            }}
+          >
+            {reveal ? token : `${token.slice(0, 10)}${'•'.repeat(24)}${token.slice(-6)}`}
+          </code>
+
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button onClick={() => copy(token, 'token')} title="Copy the raw access token" style={btnStyle}>
+              {copied === 'token' ? '✓ Copied' : '📋 Copy Access Token'}
+            </button>
+            <button onClick={() => copy(`Bearer ${token}`, 'bearer')} title="Copy 'Bearer <token>' for the Authorization header in Postman" style={btnStyle}>
+              {copied === 'bearer' ? '✓ Copied' : '📋 Copy Bearer Token'}
+            </button>
+          </div>
+
+          <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 8 }}>
+            In Postman → Authorization → Type <strong>Bearer Token</strong>, paste the access token.
+            {meta.expiresIn != null && ` Expires in ~${Math.max(0, Math.round(meta.expiresIn / 60))} min.`}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
 
 export default function AuthStage({ onComplete }) {
   const { auth, logout } = useAuth()
@@ -71,6 +155,9 @@ export default function AuthStage({ onComplete }) {
               </div>
             )}
           </div>
+
+          {/* Access token copy panel — only in real DrChrono mode */}
+          {!auth.devMode && <TokenBox />}
 
           <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
             <button
