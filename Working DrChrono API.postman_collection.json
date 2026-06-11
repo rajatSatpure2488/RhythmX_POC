@@ -1,0 +1,4832 @@
+{
+  "info": {
+    "_postman_id": "ee548505-473d-4fa7-b134-2963132126b7",
+    "name": "Working DrChrono API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "53809449",
+    "_collection_link": "https://go.postman.co/collection/53809449-ee548505-473d-4fa7-b134-2963132126b7?source=collection_link"
+  },
+  "item": [
+    {
+      "name": "Patient_Section",
+      "item": [
+        {
+          "name": "Retrive_Patient_list",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "useBrowser",
+                  "value": true,
+                  "type": "boolean"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code",
+                  "type": "string"
+                },
+                {
+                  "key": "refreshTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "authUrl",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "tokenName",
+                  "value": "DrChrono Token",
+                  "type": "string"
+                },
+                {
+                  "key": "client_authentication",
+                  "value": "header",
+                  "type": "string"
+                },
+                {
+                  "key": "scope",
+                  "value": "patients:read patients:write appointments:read appointments:write clinical:read",
+                  "type": "string"
+                },
+                {
+                  "key": "clientSecret",
+                  "value": "YjmMray2q3OSTO1fcoLWjUQ9gCLSzoHecGvpSWH7Jhx0Cu2vnXFSGQ19lxzZu05KCh3Udr4KKTlrPNJsDJ1OZUsA8kaamiRaaMDv9nQE6kc8wMIRAFMIn3NAxqCl0SQe",
+                  "type": "string"
+                },
+                {
+                  "key": "accessTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "clientId",
+                  "value": "DOHlAsvgN7RxOIdSdX2O2j3Ch6HkJfoMsS0IquYo",
+                  "type": "string"
+                },
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://app.drchrono.com/api/patients",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "patients"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create_patient",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"first_name\": \"Michael\",\r\n  \"last_name\": \"Anderson\",\r\n  \"date_of_birth\": \"1987-09-22\",\r\n  \"gender\": \"Male\",\r\n  \"doctor\": 525460\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "https://app.drchrono.com/api/patients",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "patients"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Retrive_Patient_by_ID",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "useBrowser",
+                  "value": true,
+                  "type": "boolean"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code",
+                  "type": "string"
+                },
+                {
+                  "key": "refreshTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "authUrl",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "tokenName",
+                  "value": "DrChrono Token",
+                  "type": "string"
+                },
+                {
+                  "key": "client_authentication",
+                  "value": "header",
+                  "type": "string"
+                },
+                {
+                  "key": "scope",
+                  "value": "patients:read patients:write appointments:read appointments:write clinical:read",
+                  "type": "string"
+                },
+                {
+                  "key": "clientSecret",
+                  "value": "YjmMray2q3OSTO1fcoLWjUQ9gCLSzoHecGvpSWH7Jhx0Cu2vnXFSGQ19lxzZu05KCh3Udr4KKTlrPNJsDJ1OZUsA8kaamiRaaMDv9nQE6kc8wMIRAFMIn3NAxqCl0SQe",
+                  "type": "string"
+                },
+                {
+                  "key": "accessTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "clientId",
+                  "value": "DOHlAsvgN7RxOIdSdX2O2j3Ch6HkJfoMsS0IquYo",
+                  "type": "string"
+                },
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://app.drchrono.com/api/patients/134185516",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "patients",
+                "134185516"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Medication_Section",
+      "item": [
+        {
+          "name": "Retrive_Medication_list",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "useBrowser",
+                  "value": true,
+                  "type": "boolean"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code",
+                  "type": "string"
+                },
+                {
+                  "key": "refreshTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "authUrl",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "tokenName",
+                  "value": "DrChrono Token",
+                  "type": "string"
+                },
+                {
+                  "key": "client_authentication",
+                  "value": "header",
+                  "type": "string"
+                },
+                {
+                  "key": "scope",
+                  "value": "patients:read patients:write appointments:read appointments:write clinical:read",
+                  "type": "string"
+                },
+                {
+                  "key": "clientSecret",
+                  "value": "YjmMray2q3OSTO1fcoLWjUQ9gCLSzoHecGvpSWH7Jhx0Cu2vnXFSGQ19lxzZu05KCh3Udr4KKTlrPNJsDJ1OZUsA8kaamiRaaMDv9nQE6kc8wMIRAFMIn3NAxqCl0SQe",
+                  "type": "string"
+                },
+                {
+                  "key": "accessTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "clientId",
+                  "value": "DOHlAsvgN7RxOIdSdX2O2j3Ch6HkJfoMsS0IquYo",
+                  "type": "string"
+                },
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://app.drchrono.com/api/medications",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "medications"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create Medication",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "useBrowser",
+                  "value": true,
+                  "type": "boolean"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code",
+                  "type": "string"
+                },
+                {
+                  "key": "refreshTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "authUrl",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "tokenName",
+                  "value": "DrChrono Token",
+                  "type": "string"
+                },
+                {
+                  "key": "client_authentication",
+                  "value": "header",
+                  "type": "string"
+                },
+                {
+                  "key": "scope",
+                  "value": "patients:read patients:write appointments:read appointments:write clinical:read",
+                  "type": "string"
+                },
+                {
+                  "key": "clientSecret",
+                  "value": "YjmMray2q3OSTO1fcoLWjUQ9gCLSzoHecGvpSWH7Jhx0Cu2vnXFSGQ19lxzZu05KCh3Udr4KKTlrPNJsDJ1OZUsA8kaamiRaaMDv9nQE6kc8wMIRAFMIn3NAxqCl0SQe",
+                  "type": "string"
+                },
+                {
+                  "key": "accessTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "clientId",
+                  "value": "DOHlAsvgN7RxOIdSdX2O2j3Ch6HkJfoMsS0IquYo",
+                  "type": "string"
+                },
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"doctor\": 525460,\r\n  \"patient\": 134185537,\r\n  \"date_prescribed\": \"2026-05-27\",\r\n  \"date_started_taking\": \"2026-05-27\",\r\n  \"notes\": \"Take after breakfast\",\r\n  \"order_status\": \"\",\r\n  \"number_refills\": 1,\r\n  \"dispense_quantity\": 30,\r\n  \"dosage_quantity\": \"20\",\r\n  \"dosage_units\": \"mg\",\r\n  \"rxnorm\": \"197361\",\r\n  \"route\": \"Oral\",\r\n  \"frequency\": \"Twice daily\",\r\n  \"prn\": false,\r\n  \"indication\": \"Hypertension\",\r\n  \"signature_note\": \"Take 1 tablet orally twice daily\",\r\n  \"pharmacy_note\": \"Avoid alcohol while taking medication\",\r\n  \"name\": \"Lisinopril 20 MG Oral Tablet\",\r\n  \"status\": \"active\",\r\n  \"daw\": false,\r\n  \"ndc\": \"68180098101\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "https://app.drchrono.com/api/medications",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "medications"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Retrive_Medication_by_ID",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "useBrowser",
+                  "value": true,
+                  "type": "boolean"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code",
+                  "type": "string"
+                },
+                {
+                  "key": "refreshTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "authUrl",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "tokenName",
+                  "value": "DrChrono Token",
+                  "type": "string"
+                },
+                {
+                  "key": "client_authentication",
+                  "value": "header",
+                  "type": "string"
+                },
+                {
+                  "key": "scope",
+                  "value": "patients:read patients:write appointments:read appointments:write clinical:read",
+                  "type": "string"
+                },
+                {
+                  "key": "clientSecret",
+                  "value": "YjmMray2q3OSTO1fcoLWjUQ9gCLSzoHecGvpSWH7Jhx0Cu2vnXFSGQ19lxzZu05KCh3Udr4KKTlrPNJsDJ1OZUsA8kaamiRaaMDv9nQE6kc8wMIRAFMIn3NAxqCl0SQe",
+                  "type": "string"
+                },
+                {
+                  "key": "accessTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "clientId",
+                  "value": "DOHlAsvgN7RxOIdSdX2O2j3Ch6HkJfoMsS0IquYo",
+                  "type": "string"
+                },
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://app.drchrono.com/api/medications/190671621",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "medications",
+                "190671621"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Allergies_Section",
+      "item": [
+        {
+          "name": "Get_allergies_list",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://app.drchrono.com/api/allergies",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "allergies"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Allergies_read_ID",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://app.drchrono.com/api/allergies/28210762",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "allergies",
+                "28210762"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Allergies_creation",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"id\": 28210762,\r\n    \"doctor\": 525460,\r\n    \"patient\": 134185516,\r\n    \"rxnorm\": \"123456\",\r\n    \"reaction\": \"Mild rash\",\r\n    \"snomed_reaction\": \"271807003\",\r\n    \"status\": \"active\",\r\n    \"notes\": \"Patient developed mild rash after medication, no severe complications.\",\r\n    \"verification_status\": \"verified\",\r\n    \"snomed_code\": \"419511003\"\r\n}\r\n",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "https://app.drchrono.com/api/allergies",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "allergies"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Problems_Section",
+      "item": [
+        {
+          "name": "Problems_list",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "refreshTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "useBrowser",
+                  "value": true,
+                  "type": "boolean"
+                },
+                {
+                  "key": "authUrl",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "http://localhost:8501",
+                  "type": "string"
+                },
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code",
+                  "type": "string"
+                },
+                {
+                  "key": "tokenName",
+                  "value": "DrChrono Token",
+                  "type": "string"
+                },
+                {
+                  "key": "client_authentication",
+                  "value": "header",
+                  "type": "string"
+                },
+                {
+                  "key": "scope",
+                  "value": "patients:read patients:write appointments:read appointments:write clinical:read",
+                  "type": "string"
+                },
+                {
+                  "key": "clientSecret",
+                  "value": "YjmMray2q3OSTO1fcoLWjUQ9gCLSzoHecGvpSWH7Jhx0Cu2vnXFSGQ19lxzZu05KCh3Udr4KKTlrPNJsDJ1OZUsA8kaamiRaaMDv9nQE6kc8wMIRAFMIn3NAxqCl0SQe",
+                  "type": "string"
+                },
+                {
+                  "key": "accessTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "clientId",
+                  "value": "DOHlAsvgN7RxOIdSdX2O2j3Ch6HkJfoMsS0IquYo",
+                  "type": "string"
+                },
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://app.drchrono.com/api/problems",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "problems"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "ProblemID",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "refreshTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "useBrowser",
+                  "value": true,
+                  "type": "boolean"
+                },
+                {
+                  "key": "authUrl",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "http://localhost:8501",
+                  "type": "string"
+                },
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code",
+                  "type": "string"
+                },
+                {
+                  "key": "tokenName",
+                  "value": "DrChrono Token",
+                  "type": "string"
+                },
+                {
+                  "key": "client_authentication",
+                  "value": "header",
+                  "type": "string"
+                },
+                {
+                  "key": "scope",
+                  "value": "patients:read patients:write appointments:read appointments:write clinical:read",
+                  "type": "string"
+                },
+                {
+                  "key": "clientSecret",
+                  "value": "YjmMray2q3OSTO1fcoLWjUQ9gCLSzoHecGvpSWH7Jhx0Cu2vnXFSGQ19lxzZu05KCh3Udr4KKTlrPNJsDJ1OZUsA8kaamiRaaMDv9nQE6kc8wMIRAFMIn3NAxqCl0SQe",
+                  "type": "string"
+                },
+                {
+                  "key": "accessTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "clientId",
+                  "value": "DOHlAsvgN7RxOIdSdX2O2j3Ch6HkJfoMsS0IquYo",
+                  "type": "string"
+                },
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://app.drchrono.com/api/problems/105819946",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "problems",
+                "105819946"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Creation_problem",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "refreshTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "useBrowser",
+                  "value": true,
+                  "type": "boolean"
+                },
+                {
+                  "key": "authUrl",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "http://localhost:8501",
+                  "type": "string"
+                },
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code",
+                  "type": "string"
+                },
+                {
+                  "key": "tokenName",
+                  "value": "DrChrono Token",
+                  "type": "string"
+                },
+                {
+                  "key": "client_authentication",
+                  "value": "header",
+                  "type": "string"
+                },
+                {
+                  "key": "scope",
+                  "value": "patients:read patients:write appointments:read appointments:write clinical:read",
+                  "type": "string"
+                },
+                {
+                  "key": "clientSecret",
+                  "value": "YjmMray2q3OSTO1fcoLWjUQ9gCLSzoHecGvpSWH7Jhx0Cu2vnXFSGQ19lxzZu05KCh3Udr4KKTlrPNJsDJ1OZUsA8kaamiRaaMDv9nQE6kc8wMIRAFMIn3NAxqCl0SQe",
+                  "type": "string"
+                },
+                {
+                  "key": "accessTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "clientId",
+                  "value": "DOHlAsvgN7RxOIdSdX2O2j3Ch6HkJfoMsS0IquYo",
+                  "type": "string"
+                },
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"patient\": 134441728,\r\n  \"doctor\": 525460,\r\n  \"title\": \"Diabetes Management Plan\",\r\n  \"instructions\": \"Monitor blood glucose daily. Follow diabetic diet and exercise recommendations. Schedule follow-up in 30 days.\",\r\n  \"code\": \"698360008\",\r\n  \"code_system\": \"SNOMED CT\",\r\n  \"description\": \"Diabetes self-management education\",\r\n  \"plan_type\": 2,\r\n  \"scheduled_date\": \"2026-07-19\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "https://app.drchrono.com/api/problems",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "problems"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Encounter_Section",
+      "item": [
+        {
+          "name": "Retrive_Encounter_ID",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "useBrowser",
+                  "value": true,
+                  "type": "boolean"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code",
+                  "type": "string"
+                },
+                {
+                  "key": "refreshTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "authUrl",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "tokenName",
+                  "value": "DrChrono Token",
+                  "type": "string"
+                },
+                {
+                  "key": "client_authentication",
+                  "value": "header",
+                  "type": "string"
+                },
+                {
+                  "key": "scope",
+                  "value": "patients:read patients:write appointments:read appointments:write clinical:read",
+                  "type": "string"
+                },
+                {
+                  "key": "clientSecret",
+                  "value": "YjmMray2q3OSTO1fcoLWjUQ9gCLSzoHecGvpSWH7Jhx0Cu2vnXFSGQ19lxzZu05KCh3Udr4KKTlrPNJsDJ1OZUsA8kaamiRaaMDv9nQE6kc8wMIRAFMIn3NAxqCl0SQe",
+                  "type": "string"
+                },
+                {
+                  "key": "accessTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "clientId",
+                  "value": "DOHlAsvgN7RxOIdSdX2O2j3Ch6HkJfoMsS0IquYo",
+                  "type": "string"
+                },
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://app.drchrono.com/api/appointments/{id}",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "appointments",
+                "{id}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Encounter_list",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "useBrowser",
+                  "value": true,
+                  "type": "boolean"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code",
+                  "type": "string"
+                },
+                {
+                  "key": "refreshTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "authUrl",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "tokenName",
+                  "value": "DrChrono Token",
+                  "type": "string"
+                },
+                {
+                  "key": "client_authentication",
+                  "value": "header",
+                  "type": "string"
+                },
+                {
+                  "key": "scope",
+                  "value": "patients:read patients:write appointments:read appointments:write clinical:read",
+                  "type": "string"
+                },
+                {
+                  "key": "clientSecret",
+                  "value": "YjmMray2q3OSTO1fcoLWjUQ9gCLSzoHecGvpSWH7Jhx0Cu2vnXFSGQ19lxzZu05KCh3Udr4KKTlrPNJsDJ1OZUsA8kaamiRaaMDv9nQE6kc8wMIRAFMIn3NAxqCl0SQe",
+                  "type": "string"
+                },
+                {
+                  "key": "accessTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "clientId",
+                  "value": "DOHlAsvgN7RxOIdSdX2O2j3Ch6HkJfoMsS0IquYo",
+                  "type": "string"
+                },
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://app.drchrono.com/api/appointments",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "appointments"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Creation_Encounter",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "useBrowser",
+                  "value": true,
+                  "type": "boolean"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code",
+                  "type": "string"
+                },
+                {
+                  "key": "refreshTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "authUrl",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "tokenName",
+                  "value": "DrChrono Token",
+                  "type": "string"
+                },
+                {
+                  "key": "client_authentication",
+                  "value": "header",
+                  "type": "string"
+                },
+                {
+                  "key": "scope",
+                  "value": "patients:read patients:write appointments:read appointments:write clinical:read",
+                  "type": "string"
+                },
+                {
+                  "key": "clientSecret",
+                  "value": "YjmMray2q3OSTO1fcoLWjUQ9gCLSzoHecGvpSWH7Jhx0Cu2vnXFSGQ19lxzZu05KCh3Udr4KKTlrPNJsDJ1OZUsA8kaamiRaaMDv9nQE6kc8wMIRAFMIn3NAxqCl0SQe",
+                  "type": "string"
+                },
+                {
+                  "key": "accessTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "clientId",
+                  "value": "DOHlAsvgN7RxOIdSdX2O2j3Ch6HkJfoMsS0IquYo",
+                  "type": "string"
+                },
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"patient\": 134185516,\r\n  \"doctor\": 525460,\r\n  \"scheduled_time\": \"2024-07-01T10:00:00\",\r\n  \"duration\": 30,\r\n  \"status\": \"Confirmed\",\r\n  \"reason\": \"Follow-up for hypertension management\",\r\n  \"allow_overlapping\": true,\r\n  \"office\": 559437,\r\n  \"exam_room\": 1\r\n}\r\n",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "https://app.drchrono.com/api/appointments",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "appointments"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Appointment_Section",
+      "item": [
+        {
+          "name": "Retrive_Appointment_list",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "useBrowser",
+                  "value": true,
+                  "type": "boolean"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code",
+                  "type": "string"
+                },
+                {
+                  "key": "refreshTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "authUrl",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "tokenName",
+                  "value": "DrChrono Token",
+                  "type": "string"
+                },
+                {
+                  "key": "client_authentication",
+                  "value": "header",
+                  "type": "string"
+                },
+                {
+                  "key": "scope",
+                  "value": "patients:read patients:write appointments:read appointments:write clinical:read",
+                  "type": "string"
+                },
+                {
+                  "key": "clientSecret",
+                  "value": "YjmMray2q3OSTO1fcoLWjUQ9gCLSzoHecGvpSWH7Jhx0Cu2vnXFSGQ19lxzZu05KCh3Udr4KKTlrPNJsDJ1OZUsA8kaamiRaaMDv9nQE6kc8wMIRAFMIn3NAxqCl0SQe",
+                  "type": "string"
+                },
+                {
+                  "key": "accessTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "clientId",
+                  "value": "DOHlAsvgN7RxOIdSdX2O2j3Ch6HkJfoMsS0IquYo",
+                  "type": "string"
+                },
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://app.drchrono.com/api/appointments_list",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "appointments_list"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Retrive_Appointment_ID",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "refreshTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "useBrowser",
+                  "value": true,
+                  "type": "boolean"
+                },
+                {
+                  "key": "authUrl",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "http://localhost:8501",
+                  "type": "string"
+                },
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code",
+                  "type": "string"
+                },
+                {
+                  "key": "tokenName",
+                  "value": "DrChrono Token",
+                  "type": "string"
+                },
+                {
+                  "key": "client_authentication",
+                  "value": "header",
+                  "type": "string"
+                },
+                {
+                  "key": "scope",
+                  "value": "patients:read patients:write appointments:read appointments:write clinical:read",
+                  "type": "string"
+                },
+                {
+                  "key": "clientSecret",
+                  "value": "YjmMray2q3OSTO1fcoLWjUQ9gCLSzoHecGvpSWH7Jhx0Cu2vnXFSGQ19lxzZu05KCh3Udr4KKTlrPNJsDJ1OZUsA8kaamiRaaMDv9nQE6kc8wMIRAFMIn3NAxqCl0SQe",
+                  "type": "string"
+                },
+                {
+                  "key": "accessTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "clientId",
+                  "value": "DOHlAsvgN7RxOIdSdX2O2j3Ch6HkJfoMsS0IquYo",
+                  "type": "string"
+                },
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://app.drchrono.com/api/appointments/399000764",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "appointments",
+                "399000764"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST_Appointment",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "useBrowser",
+                  "value": true,
+                  "type": "boolean"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code",
+                  "type": "string"
+                },
+                {
+                  "key": "refreshTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "authUrl",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "tokenName",
+                  "value": "DrChrono Token",
+                  "type": "string"
+                },
+                {
+                  "key": "client_authentication",
+                  "value": "header",
+                  "type": "string"
+                },
+                {
+                  "key": "scope",
+                  "value": "patients:read patients:write appointments:read appointments:write clinical:read",
+                  "type": "string"
+                },
+                {
+                  "key": "clientSecret",
+                  "value": "YjmMray2q3OSTO1fcoLWjUQ9gCLSzoHecGvpSWH7Jhx0Cu2vnXFSGQ19lxzZu05KCh3Udr4KKTlrPNJsDJ1OZUsA8kaamiRaaMDv9nQE6kc8wMIRAFMIn3NAxqCl0SQe",
+                  "type": "string"
+                },
+                {
+                  "key": "accessTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "clientId",
+                  "value": "DOHlAsvgN7RxOIdSdX2O2j3Ch6HkJfoMsS0IquYo",
+                  "type": "string"
+                },
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"patient\": 134185516,\r\n  \"doctor\": 525460,\r\n  \"scheduled_time\": \"2024-07-01T10:00:00\",\r\n  \"duration\": 30,\r\n  \"status\": \"Confirmed\",\r\n  \"reason\": \"Follow-up for hypertension management\",\r\n  \"allow_overlapping\": true,\r\n  \"office\": 559437,\r\n  \"exam_room\": 1\r\n}\r\n",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "https://app.drchrono.com/api/appointments",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "appointments"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Patch_appointment_vitals",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "refreshTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "useBrowser",
+                  "value": true,
+                  "type": "boolean"
+                },
+                {
+                  "key": "authUrl",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "http://localhost:8501",
+                  "type": "string"
+                },
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code",
+                  "type": "string"
+                },
+                {
+                  "key": "tokenName",
+                  "value": "DrChrono Token",
+                  "type": "string"
+                },
+                {
+                  "key": "client_authentication",
+                  "value": "header",
+                  "type": "string"
+                },
+                {
+                  "key": "scope",
+                  "value": "patients:read patients:write appointments:read appointments:write clinical:read",
+                  "type": "string"
+                },
+                {
+                  "key": "clientSecret",
+                  "value": "YjmMray2q3OSTO1fcoLWjUQ9gCLSzoHecGvpSWH7Jhx0Cu2vnXFSGQ19lxzZu05KCh3Udr4KKTlrPNJsDJ1OZUsA8kaamiRaaMDv9nQE6kc8wMIRAFMIn3NAxqCl0SQe",
+                  "type": "string"
+                },
+                {
+                  "key": "accessTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "clientId",
+                  "value": "DOHlAsvgN7RxOIdSdX2O2j3Ch6HkJfoMsS0IquYo",
+                  "type": "string"
+                },
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PATCH",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"vitals\": {\r\n    \"height\": 67,\r\n    \"height_units\": \"inches\",\r\n    \"weight\": 158,\r\n    \"weight_units\": \"lbs\",\r\n    \"temperature\": 98.9,\r\n    \"temperature_units\": \"f\",\r\n    \"blood_pressure_1\": 120,\r\n    \"blood_pressure_2\": 80,\r\n    \"pulse\": 60,\r\n    \"respiratory_rate\": 16,\r\n    \"oxygen_saturation\": 98,\r\n    \"pain\": \"2\",\r\n    \"head_circumference\": 0,\r\n    \"head_circumference_units\": \"inches\",\r\n    \"smoking_status\": \"blank\"\r\n  },\r\n  \"status\": \"Checked In\",\r\n  \"notes\": \"Vitals push test - RhythmX AI 2026-06-07\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "https://app.drchrono.com/api/appointments/398995552",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "appointments",
+                "398995552"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Vital",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "refreshTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "useBrowser",
+                  "value": true,
+                  "type": "boolean"
+                },
+                {
+                  "key": "authUrl",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "http://localhost:8501",
+                  "type": "string"
+                },
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code",
+                  "type": "string"
+                },
+                {
+                  "key": "tokenName",
+                  "value": "DrChrono Token",
+                  "type": "string"
+                },
+                {
+                  "key": "client_authentication",
+                  "value": "header",
+                  "type": "string"
+                },
+                {
+                  "key": "scope",
+                  "value": "patients:read patients:write appointments:read appointments:write clinical:read",
+                  "type": "string"
+                },
+                {
+                  "key": "clientSecret",
+                  "value": "YjmMray2q3OSTO1fcoLWjUQ9gCLSzoHecGvpSWH7Jhx0Cu2vnXFSGQ19lxzZu05KCh3Udr4KKTlrPNJsDJ1OZUsA8kaamiRaaMDv9nQE6kc8wMIRAFMIn3NAxqCl0SQe",
+                  "type": "string"
+                },
+                {
+                  "key": "accessTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "clientId",
+                  "value": "DOHlAsvgN7RxOIdSdX2O2j3Ch6HkJfoMsS0IquYo",
+                  "type": "string"
+                },
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://app.drchrono.com/api/vital_signs?appointment=399000764",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "vital_signs"
+              ],
+              "query": [
+                {
+                  "key": "appointment",
+                  "value": "399000764"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Vital Copy",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "refreshTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "useBrowser",
+                  "value": true,
+                  "type": "boolean"
+                },
+                {
+                  "key": "authUrl",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "http://localhost:8501",
+                  "type": "string"
+                },
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code",
+                  "type": "string"
+                },
+                {
+                  "key": "tokenName",
+                  "value": "DrChrono Token",
+                  "type": "string"
+                },
+                {
+                  "key": "client_authentication",
+                  "value": "header",
+                  "type": "string"
+                },
+                {
+                  "key": "scope",
+                  "value": "patients:read patients:write appointments:read appointments:write clinical:read",
+                  "type": "string"
+                },
+                {
+                  "key": "clientSecret",
+                  "value": "YjmMray2q3OSTO1fcoLWjUQ9gCLSzoHecGvpSWH7Jhx0Cu2vnXFSGQ19lxzZu05KCh3Udr4KKTlrPNJsDJ1OZUsA8kaamiRaaMDv9nQE6kc8wMIRAFMIn3NAxqCl0SQe",
+                  "type": "string"
+                },
+                {
+                  "key": "accessTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "clientId",
+                  "value": "DOHlAsvgN7RxOIdSdX2O2j3Ch6HkJfoMsS0IquYo",
+                  "type": "string"
+                },
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://app.drchrono.com/api/custom_vital_types",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "custom_vital_types"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Upload_document_Section",
+      "item": [
+        {
+          "name": "Get_Document",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "useBrowser",
+                  "value": true,
+                  "type": "boolean"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code",
+                  "type": "string"
+                },
+                {
+                  "key": "refreshTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "authUrl",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "tokenName",
+                  "value": "DrChrono Token",
+                  "type": "string"
+                },
+                {
+                  "key": "client_authentication",
+                  "value": "header",
+                  "type": "string"
+                },
+                {
+                  "key": "scope",
+                  "value": "patients:read patients:write appointments:read appointments:write clinical:read",
+                  "type": "string"
+                },
+                {
+                  "key": "clientSecret",
+                  "value": "YjmMray2q3OSTO1fcoLWjUQ9gCLSzoHecGvpSWH7Jhx0Cu2vnXFSGQ19lxzZu05KCh3Udr4KKTlrPNJsDJ1OZUsA8kaamiRaaMDv9nQE6kc8wMIRAFMIn3NAxqCl0SQe",
+                  "type": "string"
+                },
+                {
+                  "key": "accessTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "clientId",
+                  "value": "DOHlAsvgN7RxOIdSdX2O2j3Ch6HkJfoMsS0IquYo",
+                  "type": "string"
+                },
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://app.drchrono.com/api/documents/411225513",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "documents",
+                "411225513"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List_of_document",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "useBrowser",
+                  "value": true,
+                  "type": "boolean"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code",
+                  "type": "string"
+                },
+                {
+                  "key": "refreshTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "authUrl",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "tokenName",
+                  "value": "DrChrono Token",
+                  "type": "string"
+                },
+                {
+                  "key": "client_authentication",
+                  "value": "header",
+                  "type": "string"
+                },
+                {
+                  "key": "scope",
+                  "value": "patients:read patients:write appointments:read appointments:write clinical:read",
+                  "type": "string"
+                },
+                {
+                  "key": "clientSecret",
+                  "value": "YjmMray2q3OSTO1fcoLWjUQ9gCLSzoHecGvpSWH7Jhx0Cu2vnXFSGQ19lxzZu05KCh3Udr4KKTlrPNJsDJ1OZUsA8kaamiRaaMDv9nQE6kc8wMIRAFMIn3NAxqCl0SQe",
+                  "type": "string"
+                },
+                {
+                  "key": "accessTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "clientId",
+                  "value": "DOHlAsvgN7RxOIdSdX2O2j3Ch6HkJfoMsS0IquYo",
+                  "type": "string"
+                },
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://app.drchrono.com/api/documents",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "documents"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Post_Upload_document",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "useBrowser",
+                  "value": true,
+                  "type": "boolean"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code",
+                  "type": "string"
+                },
+                {
+                  "key": "refreshTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "authUrl",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "tokenName",
+                  "value": "DrChrono Token",
+                  "type": "string"
+                },
+                {
+                  "key": "client_authentication",
+                  "value": "header",
+                  "type": "string"
+                },
+                {
+                  "key": "scope",
+                  "value": "patients:read patients:write appointments:read appointments:write clinical:read",
+                  "type": "string"
+                },
+                {
+                  "key": "clientSecret",
+                  "value": "YjmMray2q3OSTO1fcoLWjUQ9gCLSzoHecGvpSWH7Jhx0Cu2vnXFSGQ19lxzZu05KCh3Udr4KKTlrPNJsDJ1OZUsA8kaamiRaaMDv9nQE6kc8wMIRAFMIn3NAxqCl0SQe",
+                  "type": "string"
+                },
+                {
+                  "key": "accessTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "clientId",
+                  "value": "DOHlAsvgN7RxOIdSdX2O2j3Ch6HkJfoMsS0IquYo",
+                  "type": "string"
+                },
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "patient",
+                  "value": "134185516",
+                  "type": "text",
+                  "uuid": "071e8147-3253-47c0-9a0a-f5453c8884e2"
+                },
+                {
+                  "key": "doctor",
+                  "value": "525460",
+                  "type": "text",
+                  "uuid": "7565e821-a76a-4a99-a278-4376149432bc"
+                },
+                {
+                  "key": "description",
+                  "value": "General Document",
+                  "type": "text",
+                  "uuid": "3f528ad0-3029-4a1a-ade5-ec8f25c5a7ed"
+                },
+                {
+                  "key": "date",
+                  "value": "2024-07-01",
+                  "type": "text",
+                  "uuid": "277ab272-c227-40a7-87e9-16be16f958a5"
+                },
+                {
+                  "key": "metatags",
+                  "value": "lab|cbc|uploaded",
+                  "type": "text",
+                  "uuid": "ecb7df12-d65b-4a4a-bb9f-730d101cf6da"
+                },
+                {
+                  "key": "archived",
+                  "value": "false",
+                  "type": "text",
+                  "uuid": "1bbf5175-1de1-4bcc-be98-185f69e699fe"
+                },
+                {
+                  "key": "document",
+                  "type": "file",
+                  "uuid": "06845cae-997c-4e50-9ce6-9b16e814cb67",
+                  "value": null
+                }
+              ]
+            },
+            "url": {
+              "raw": "https://app.drchrono.com/api/documents",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "documents"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Diagnostic_Report_Section",
+      "item": [
+        {
+          "name": "Care plan Copy",
+          "item": [
+            {
+              "name": "care_plans",
+              "request": {
+                "auth": {
+                  "type": "oauth2",
+                  "oauth2": [
+                    {
+                      "key": "refreshTokenUrl",
+                      "value": "https://drchrono.com/o/token/",
+                      "type": "string"
+                    },
+                    {
+                      "key": "useBrowser",
+                      "value": true,
+                      "type": "boolean"
+                    },
+                    {
+                      "key": "authUrl",
+                      "value": "https://drchrono.com/o/authorize/",
+                      "type": "string"
+                    },
+                    {
+                      "key": "redirect_uri",
+                      "value": "http://localhost:8501",
+                      "type": "string"
+                    },
+                    {
+                      "key": "grant_type",
+                      "value": "authorization_code",
+                      "type": "string"
+                    },
+                    {
+                      "key": "tokenName",
+                      "value": "DrChrono Token",
+                      "type": "string"
+                    },
+                    {
+                      "key": "client_authentication",
+                      "value": "header",
+                      "type": "string"
+                    },
+                    {
+                      "key": "scope",
+                      "value": "patients:read patients:write appointments:read appointments:write clinical:read",
+                      "type": "string"
+                    },
+                    {
+                      "key": "clientSecret",
+                      "value": "YjmMray2q3OSTO1fcoLWjUQ9gCLSzoHecGvpSWH7Jhx0Cu2vnXFSGQ19lxzZu05KCh3Udr4KKTlrPNJsDJ1OZUsA8kaamiRaaMDv9nQE6kc8wMIRAFMIn3NAxqCl0SQe",
+                      "type": "string"
+                    },
+                    {
+                      "key": "accessTokenUrl",
+                      "value": "https://drchrono.com/o/token/",
+                      "type": "string"
+                    },
+                    {
+                      "key": "clientId",
+                      "value": "DOHlAsvgN7RxOIdSdX2O2j3Ch6HkJfoMsS0IquYo",
+                      "type": "string"
+                    },
+                    {
+                      "key": "addTokenTo",
+                      "value": "header",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "https://app.drchrono.com/api/care_plans",
+                  "protocol": "https",
+                  "host": [
+                    "app",
+                    "drchrono",
+                    "com"
+                  ],
+                  "path": [
+                    "api",
+                    "care_plans"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "care_plan_id",
+              "request": {
+                "auth": {
+                  "type": "oauth2",
+                  "oauth2": [
+                    {
+                      "key": "refreshTokenUrl",
+                      "value": "https://drchrono.com/o/token/",
+                      "type": "string"
+                    },
+                    {
+                      "key": "useBrowser",
+                      "value": true,
+                      "type": "boolean"
+                    },
+                    {
+                      "key": "authUrl",
+                      "value": "https://drchrono.com/o/authorize/",
+                      "type": "string"
+                    },
+                    {
+                      "key": "redirect_uri",
+                      "value": "http://localhost:8501",
+                      "type": "string"
+                    },
+                    {
+                      "key": "grant_type",
+                      "value": "authorization_code",
+                      "type": "string"
+                    },
+                    {
+                      "key": "tokenName",
+                      "value": "DrChrono Token",
+                      "type": "string"
+                    },
+                    {
+                      "key": "client_authentication",
+                      "value": "header",
+                      "type": "string"
+                    },
+                    {
+                      "key": "scope",
+                      "value": "patients:read patients:write appointments:read appointments:write clinical:read",
+                      "type": "string"
+                    },
+                    {
+                      "key": "clientSecret",
+                      "value": "YjmMray2q3OSTO1fcoLWjUQ9gCLSzoHecGvpSWH7Jhx0Cu2vnXFSGQ19lxzZu05KCh3Udr4KKTlrPNJsDJ1OZUsA8kaamiRaaMDv9nQE6kc8wMIRAFMIn3NAxqCl0SQe",
+                      "type": "string"
+                    },
+                    {
+                      "key": "accessTokenUrl",
+                      "value": "https://drchrono.com/o/token/",
+                      "type": "string"
+                    },
+                    {
+                      "key": "clientId",
+                      "value": "DOHlAsvgN7RxOIdSdX2O2j3Ch6HkJfoMsS0IquYo",
+                      "type": "string"
+                    },
+                    {
+                      "key": "addTokenTo",
+                      "value": "header",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "https://app.drchrono.com/api/care_plans/101821",
+                  "protocol": "https",
+                  "host": [
+                    "app",
+                    "drchrono",
+                    "com"
+                  ],
+                  "path": [
+                    "api",
+                    "care_plans",
+                    "101821"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "care_plan",
+              "request": {
+                "auth": {
+                  "type": "oauth2",
+                  "oauth2": [
+                    {
+                      "key": "refreshTokenUrl",
+                      "value": "https://drchrono.com/o/token/",
+                      "type": "string"
+                    },
+                    {
+                      "key": "useBrowser",
+                      "value": true,
+                      "type": "boolean"
+                    },
+                    {
+                      "key": "authUrl",
+                      "value": "https://drchrono.com/o/authorize/",
+                      "type": "string"
+                    },
+                    {
+                      "key": "redirect_uri",
+                      "value": "http://localhost:8501",
+                      "type": "string"
+                    },
+                    {
+                      "key": "grant_type",
+                      "value": "authorization_code",
+                      "type": "string"
+                    },
+                    {
+                      "key": "tokenName",
+                      "value": "DrChrono Token",
+                      "type": "string"
+                    },
+                    {
+                      "key": "client_authentication",
+                      "value": "header",
+                      "type": "string"
+                    },
+                    {
+                      "key": "scope",
+                      "value": "patients:read patients:write appointments:read appointments:write clinical:read",
+                      "type": "string"
+                    },
+                    {
+                      "key": "clientSecret",
+                      "value": "YjmMray2q3OSTO1fcoLWjUQ9gCLSzoHecGvpSWH7Jhx0Cu2vnXFSGQ19lxzZu05KCh3Udr4KKTlrPNJsDJ1OZUsA8kaamiRaaMDv9nQE6kc8wMIRAFMIn3NAxqCl0SQe",
+                      "type": "string"
+                    },
+                    {
+                      "key": "accessTokenUrl",
+                      "value": "https://drchrono.com/o/token/",
+                      "type": "string"
+                    },
+                    {
+                      "key": "clientId",
+                      "value": "DOHlAsvgN7RxOIdSdX2O2j3Ch6HkJfoMsS0IquYo",
+                      "type": "string"
+                    },
+                    {
+                      "key": "addTokenTo",
+                      "value": "header",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "method": "POST",
+                "header": [],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n  \"patient\": 134441728,\r\n  \"appointment\": 399409800,\r\n  \"title\": \"Diabetes Management Plan\",\r\n  \"description\": \"Patient diagnosed with Type 2 Diabetes.\",\r\n  \"instructions\": \"Monitor glucose twice daily and follow diabetic diet.\",\r\n  \"code\": \"44054006\",\r\n  \"code_system\": \"SNOMED\",\r\n  \"plan_type\": 1,\r\n  \"scheduled_date\": \"2026-06-15\"\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "https://app.drchrono.com/api/care_plans",
+                  "protocol": "https",
+                  "host": [
+                    "app",
+                    "drchrono",
+                    "com"
+                  ],
+                  "path": [
+                    "api",
+                    "care_plans"
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Get_Document",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "useBrowser",
+                  "value": true,
+                  "type": "boolean"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code",
+                  "type": "string"
+                },
+                {
+                  "key": "refreshTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "authUrl",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "tokenName",
+                  "value": "DrChrono Token",
+                  "type": "string"
+                },
+                {
+                  "key": "client_authentication",
+                  "value": "header",
+                  "type": "string"
+                },
+                {
+                  "key": "scope",
+                  "value": "patients:read patients:write appointments:read appointments:write clinical:read",
+                  "type": "string"
+                },
+                {
+                  "key": "clientSecret",
+                  "value": "YjmMray2q3OSTO1fcoLWjUQ9gCLSzoHecGvpSWH7Jhx0Cu2vnXFSGQ19lxzZu05KCh3Udr4KKTlrPNJsDJ1OZUsA8kaamiRaaMDv9nQE6kc8wMIRAFMIn3NAxqCl0SQe",
+                  "type": "string"
+                },
+                {
+                  "key": "accessTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "clientId",
+                  "value": "DOHlAsvgN7RxOIdSdX2O2j3Ch6HkJfoMsS0IquYo",
+                  "type": "string"
+                },
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://app.drchrono.com/api/documents/411225513",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "documents",
+                "411225513"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List_of_document",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "useBrowser",
+                  "value": true,
+                  "type": "boolean"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code",
+                  "type": "string"
+                },
+                {
+                  "key": "refreshTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "authUrl",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "tokenName",
+                  "value": "DrChrono Token",
+                  "type": "string"
+                },
+                {
+                  "key": "client_authentication",
+                  "value": "header",
+                  "type": "string"
+                },
+                {
+                  "key": "scope",
+                  "value": "patients:read patients:write appointments:read appointments:write clinical:read",
+                  "type": "string"
+                },
+                {
+                  "key": "clientSecret",
+                  "value": "YjmMray2q3OSTO1fcoLWjUQ9gCLSzoHecGvpSWH7Jhx0Cu2vnXFSGQ19lxzZu05KCh3Udr4KKTlrPNJsDJ1OZUsA8kaamiRaaMDv9nQE6kc8wMIRAFMIn3NAxqCl0SQe",
+                  "type": "string"
+                },
+                {
+                  "key": "accessTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "clientId",
+                  "value": "DOHlAsvgN7RxOIdSdX2O2j3Ch6HkJfoMsS0IquYo",
+                  "type": "string"
+                },
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://app.drchrono.com/api/documents",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "documents"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Post_Upload_document",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "useBrowser",
+                  "value": true,
+                  "type": "boolean"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code",
+                  "type": "string"
+                },
+                {
+                  "key": "refreshTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "authUrl",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "tokenName",
+                  "value": "DrChrono Token",
+                  "type": "string"
+                },
+                {
+                  "key": "client_authentication",
+                  "value": "header",
+                  "type": "string"
+                },
+                {
+                  "key": "scope",
+                  "value": "patients:read patients:write appointments:read appointments:write clinical:read",
+                  "type": "string"
+                },
+                {
+                  "key": "clientSecret",
+                  "value": "YjmMray2q3OSTO1fcoLWjUQ9gCLSzoHecGvpSWH7Jhx0Cu2vnXFSGQ19lxzZu05KCh3Udr4KKTlrPNJsDJ1OZUsA8kaamiRaaMDv9nQE6kc8wMIRAFMIn3NAxqCl0SQe",
+                  "type": "string"
+                },
+                {
+                  "key": "accessTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "clientId",
+                  "value": "DOHlAsvgN7RxOIdSdX2O2j3Ch6HkJfoMsS0IquYo",
+                  "type": "string"
+                },
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "patient",
+                  "value": "134185516",
+                  "type": "text",
+                  "uuid": "071e8147-3253-47c0-9a0a-f5453c8884e2"
+                },
+                {
+                  "key": "doctor",
+                  "value": "525460",
+                  "type": "text",
+                  "uuid": "7565e821-a76a-4a99-a278-4376149432bc"
+                },
+                {
+                  "key": "description",
+                  "value": "General Document",
+                  "type": "text",
+                  "uuid": "3f528ad0-3029-4a1a-ade5-ec8f25c5a7ed"
+                },
+                {
+                  "key": "date",
+                  "value": "2024-07-01",
+                  "type": "text",
+                  "uuid": "277ab272-c227-40a7-87e9-16be16f958a5"
+                },
+                {
+                  "key": "metatags",
+                  "value": "lab|cbc|uploaded",
+                  "type": "text",
+                  "uuid": "ecb7df12-d65b-4a4a-bb9f-730d101cf6da"
+                },
+                {
+                  "key": "archived",
+                  "value": "false",
+                  "type": "text",
+                  "uuid": "1bbf5175-1de1-4bcc-be98-185f69e699fe"
+                },
+                {
+                  "key": "document",
+                  "type": "file",
+                  "uuid": "06845cae-997c-4e50-9ce6-9b16e814cb67",
+                  "value": null
+                }
+              ]
+            },
+            "url": {
+              "raw": "https://app.drchrono.com/api/documents",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "documents"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Clinical_notes_Section",
+      "item": [
+        {
+          "name": "Clinical_note_template_ID",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "useBrowser",
+                  "value": true,
+                  "type": "boolean"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code",
+                  "type": "string"
+                },
+                {
+                  "key": "refreshTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "authUrl",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "tokenName",
+                  "value": "DrChrono Token",
+                  "type": "string"
+                },
+                {
+                  "key": "client_authentication",
+                  "value": "header",
+                  "type": "string"
+                },
+                {
+                  "key": "scope",
+                  "value": "patients:read patients:write appointments:read appointments:write clinical:read",
+                  "type": "string"
+                },
+                {
+                  "key": "clientSecret",
+                  "value": "YjmMray2q3OSTO1fcoLWjUQ9gCLSzoHecGvpSWH7Jhx0Cu2vnXFSGQ19lxzZu05KCh3Udr4KKTlrPNJsDJ1OZUsA8kaamiRaaMDv9nQE6kc8wMIRAFMIn3NAxqCl0SQe",
+                  "type": "string"
+                },
+                {
+                  "key": "accessTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "clientId",
+                  "value": "DOHlAsvgN7RxOIdSdX2O2j3Ch6HkJfoMsS0IquYo",
+                  "type": "string"
+                },
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://app.drchrono.com/api/clinical_note_templates/7518380",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "clinical_note_templates",
+                "7518380"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "list_clinical_note_templates",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "useBrowser",
+                  "value": true,
+                  "type": "boolean"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code",
+                  "type": "string"
+                },
+                {
+                  "key": "refreshTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "authUrl",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "tokenName",
+                  "value": "DrChrono Token",
+                  "type": "string"
+                },
+                {
+                  "key": "client_authentication",
+                  "value": "header",
+                  "type": "string"
+                },
+                {
+                  "key": "scope",
+                  "value": "patients:read patients:write appointments:read appointments:write clinical:read",
+                  "type": "string"
+                },
+                {
+                  "key": "clientSecret",
+                  "value": "YjmMray2q3OSTO1fcoLWjUQ9gCLSzoHecGvpSWH7Jhx0Cu2vnXFSGQ19lxzZu05KCh3Udr4KKTlrPNJsDJ1OZUsA8kaamiRaaMDv9nQE6kc8wMIRAFMIn3NAxqCl0SQe",
+                  "type": "string"
+                },
+                {
+                  "key": "accessTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "clientId",
+                  "value": "DOHlAsvgN7RxOIdSdX2O2j3Ch6HkJfoMsS0IquYo",
+                  "type": "string"
+                },
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://app.drchrono.com/api/clinical_note_templates",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "clinical_note_templates"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "clinical_note_field_types",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://app.drchrono.com/api/clinical_note_field_types",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "clinical_note_field_types"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "clinical_note_field_values",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "https://app.drchrono.com/api/clinical_note_field_values",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "clinical_note_field_values"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Working_clinical_note_field_values",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://app.drchrono.com/api/clinical_note_field_values?appointment=399340935&clinical_note_template=7520906",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "clinical_note_field_values"
+              ],
+              "query": [
+                {
+                  "key": "appointment",
+                  "value": "399340935"
+                },
+                {
+                  "key": "clinical_note_template",
+                  "value": "7520906"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Working_clinical_note_templates",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://app.drchrono.com/api/clinical_note_templates",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "clinical_note_templates"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "clinical_notes_list",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "refreshTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "useBrowser",
+                  "value": true,
+                  "type": "boolean"
+                },
+                {
+                  "key": "authUrl",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "http://localhost:8501",
+                  "type": "string"
+                },
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code",
+                  "type": "string"
+                },
+                {
+                  "key": "tokenName",
+                  "value": "DrChrono Token",
+                  "type": "string"
+                },
+                {
+                  "key": "client_authentication",
+                  "value": "header",
+                  "type": "string"
+                },
+                {
+                  "key": "scope",
+                  "value": "patients:read patients:write appointments:read appointments:write clinical:read",
+                  "type": "string"
+                },
+                {
+                  "key": "clientSecret",
+                  "value": "YjmMray2q3OSTO1fcoLWjUQ9gCLSzoHecGvpSWH7Jhx0Cu2vnXFSGQ19lxzZu05KCh3Udr4KKTlrPNJsDJ1OZUsA8kaamiRaaMDv9nQE6kc8wMIRAFMIn3NAxqCl0SQe",
+                  "type": "string"
+                },
+                {
+                  "key": "accessTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "clientId",
+                  "value": "DOHlAsvgN7RxOIdSdX2O2j3Ch6HkJfoMsS0IquYo",
+                  "type": "string"
+                },
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://app.drchrono.com/api/clinical_notes_list?appointment=399000764",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "clinical_notes_list"
+              ],
+              "query": [
+                {
+                  "key": "appointment",
+                  "value": "399000764"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "clinical_notes_list_list",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "useBrowser",
+                  "value": true,
+                  "type": "boolean"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code",
+                  "type": "string"
+                },
+                {
+                  "key": "refreshTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "authUrl",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "tokenName",
+                  "value": "DrChrono Token",
+                  "type": "string"
+                },
+                {
+                  "key": "client_authentication",
+                  "value": "header",
+                  "type": "string"
+                },
+                {
+                  "key": "scope",
+                  "value": "patients:read patients:write appointments:read appointments:write clinical:read",
+                  "type": "string"
+                },
+                {
+                  "key": "clientSecret",
+                  "value": "YjmMray2q3OSTO1fcoLWjUQ9gCLSzoHecGvpSWH7Jhx0Cu2vnXFSGQ19lxzZu05KCh3Udr4KKTlrPNJsDJ1OZUsA8kaamiRaaMDv9nQE6kc8wMIRAFMIn3NAxqCl0SQe",
+                  "type": "string"
+                },
+                {
+                  "key": "accessTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "clientId",
+                  "value": "DOHlAsvgN7RxOIdSdX2O2j3Ch6HkJfoMsS0IquYo",
+                  "type": "string"
+                },
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://app.drchrono.com/api/clinical_notes_list",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "clinical_notes_list"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "clinical_note_field_values_list",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://app.drchrono.com/api/clinical_note_field_types?clinical_note_template=7520906",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "clinical_note_field_types"
+              ],
+              "query": [
+                {
+                  "key": "clinical_note_template",
+                  "value": "7520906"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "clinical_notes_list",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "https://app.drchrono.com/api/clinical_notes_list",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "clinical_notes_list"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "clinical_notes",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "useBrowser",
+                  "value": true,
+                  "type": "boolean"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code",
+                  "type": "string"
+                },
+                {
+                  "key": "refreshTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "authUrl",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "tokenName",
+                  "value": "DrChrono Token",
+                  "type": "string"
+                },
+                {
+                  "key": "client_authentication",
+                  "value": "header",
+                  "type": "string"
+                },
+                {
+                  "key": "scope",
+                  "value": "patients:read patients:write appointments:read appointments:write clinical:read",
+                  "type": "string"
+                },
+                {
+                  "key": "clientSecret",
+                  "value": "YjmMray2q3OSTO1fcoLWjUQ9gCLSzoHecGvpSWH7Jhx0Cu2vnXFSGQ19lxzZu05KCh3Udr4KKTlrPNJsDJ1OZUsA8kaamiRaaMDv9nQE6kc8wMIRAFMIn3NAxqCl0SQe",
+                  "type": "string"
+                },
+                {
+                  "key": "accessTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "clientId",
+                  "value": "DOHlAsvgN7RxOIdSdX2O2j3Ch6HkJfoMsS0IquYo",
+                  "type": "string"
+                },
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://app.drchrono.com/api/clinical_notes",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "clinical_notes"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "DrChrono Yellow_notepad_api",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "",
+                "value": "",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"content\": \"Temperature: 98.6°F | Pulse: 72 bpm | Blood Pressure: 120/80 mmHg | Respiratory Rate: 16 rpm | Oxygen Saturation: 98% | Height: 65 in | Weight: 160 lbs | BMI: 26.6 kg/m² | Pain Score: 2/10\\n\\nPatient is an 81-year-old male presenting for follow-up evaluation. On examination, the patient is alert, oriented, and cooperative. Vital signs reviewed: temperature 98.6°F (afebrile), pulse 72 bpm (regular rate and rhythm), blood pressure 120/80 mmHg (mildly elevated, pre-hypertensive range), respiratory rate 16 rpm (unlabored), and oxygen saturation 98% on room air (within acceptable range). Anthropometric data: height 65 inches, weight 160 lbs, BMI 26.6 kg/m² (overweight range). Patient reports mild discomfort (2/10 on visual analog scale). No acute cardiorespiratory distress noted. Clinical findings are consistent with the patient's established medical history; current vital parameters will be correlated with prior visit trends. A tailored management plan including medication adjustment, lifestyle counseling, and appropriate follow-up has been discussed at length with the patient, who verbalized understanding and agreement with the proposed care plan. xyz\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "https://app.drchrono.com/api/yellow_notepad?appointment_id=398995552&template_id=7520906",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "yellow_notepad"
+              ],
+              "query": [
+                {
+                  "key": "appointment_id",
+                  "value": "398995552"
+                },
+                {
+                  "key": "template_id",
+                  "value": "7520906"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "amendments_list_all",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "refreshTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "useBrowser",
+                  "value": true,
+                  "type": "boolean"
+                },
+                {
+                  "key": "authUrl",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "http://localhost:8501",
+                  "type": "string"
+                },
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code",
+                  "type": "string"
+                },
+                {
+                  "key": "tokenName",
+                  "value": "DrChrono Token",
+                  "type": "string"
+                },
+                {
+                  "key": "client_authentication",
+                  "value": "header",
+                  "type": "string"
+                },
+                {
+                  "key": "scope",
+                  "value": "patients:read patients:write appointments:read appointments:write clinical:read",
+                  "type": "string"
+                },
+                {
+                  "key": "clientSecret",
+                  "value": "YjmMray2q3OSTO1fcoLWjUQ9gCLSzoHecGvpSWH7Jhx0Cu2vnXFSGQ19lxzZu05KCh3Udr4KKTlrPNJsDJ1OZUsA8kaamiRaaMDv9nQE6kc8wMIRAFMIn3NAxqCl0SQe",
+                  "type": "string"
+                },
+                {
+                  "key": "accessTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "clientId",
+                  "value": "DOHlAsvgN7RxOIdSdX2O2j3Ch6HkJfoMsS0IquYo",
+                  "type": "string"
+                },
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://app.drchrono.com/api/amendments?appointmentid=399633824&clinical_note_template=7520906&patientid=134478212",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "amendments"
+              ],
+              "query": [
+                {
+                  "key": "appointmentid",
+                  "value": "399633824"
+                },
+                {
+                  "key": "clinical_note_template",
+                  "value": "7520906"
+                },
+                {
+                  "key": "patientid",
+                  "value": "134478212",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "amendments_list_all",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "refreshTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "useBrowser",
+                  "value": true,
+                  "type": "boolean"
+                },
+                {
+                  "key": "authUrl",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "http://localhost:8501",
+                  "type": "string"
+                },
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code",
+                  "type": "string"
+                },
+                {
+                  "key": "tokenName",
+                  "value": "DrChrono Token",
+                  "type": "string"
+                },
+                {
+                  "key": "client_authentication",
+                  "value": "header",
+                  "type": "string"
+                },
+                {
+                  "key": "scope",
+                  "value": "patients:read patients:write appointments:read appointments:write clinical:read",
+                  "type": "string"
+                },
+                {
+                  "key": "clientSecret",
+                  "value": "YjmMray2q3OSTO1fcoLWjUQ9gCLSzoHecGvpSWH7Jhx0Cu2vnXFSGQ19lxzZu05KCh3Udr4KKTlrPNJsDJ1OZUsA8kaamiRaaMDv9nQE6kc8wMIRAFMIn3NAxqCl0SQe",
+                  "type": "string"
+                },
+                {
+                  "key": "accessTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "clientId",
+                  "value": "DOHlAsvgN7RxOIdSdX2O2j3Ch6HkJfoMsS0IquYo",
+                  "type": "string"
+                },
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://app.drchrono.com/api/amendments?appointmentid=399633824",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "amendments"
+              ],
+              "query": [
+                {
+                  "key": "appointmentid",
+                  "value": "399633824"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "amendments_list",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "refreshTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "useBrowser",
+                  "value": true,
+                  "type": "boolean"
+                },
+                {
+                  "key": "authUrl",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "http://localhost:8501",
+                  "type": "string"
+                },
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code",
+                  "type": "string"
+                },
+                {
+                  "key": "tokenName",
+                  "value": "DrChrono Token",
+                  "type": "string"
+                },
+                {
+                  "key": "client_authentication",
+                  "value": "header",
+                  "type": "string"
+                },
+                {
+                  "key": "scope",
+                  "value": "patients:read patients:write appointments:read appointments:write clinical:read",
+                  "type": "string"
+                },
+                {
+                  "key": "clientSecret",
+                  "value": "YjmMray2q3OSTO1fcoLWjUQ9gCLSzoHecGvpSWH7Jhx0Cu2vnXFSGQ19lxzZu05KCh3Udr4KKTlrPNJsDJ1OZUsA8kaamiRaaMDv9nQE6kc8wMIRAFMIn3NAxqCl0SQe",
+                  "type": "string"
+                },
+                {
+                  "key": "accessTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "clientId",
+                  "value": "DOHlAsvgN7RxOIdSdX2O2j3Ch6HkJfoMsS0IquYo",
+                  "type": "string"
+                },
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://app.drchrono.com/api/amendments",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "amendments"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Amendments",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"appointment\": 399340935,\r\n    \"patient\": 134441728,\r\n  \"amendment_name\": \"Testing from the Postmant that notes are successfully pushing or not\",\r\n  \"doctor\": 525460,\r\n  \"comments\": \"Testing\",\r\n  \"amendment_file\": \"Clinical note\"\r\n\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "https://app.drchrono.com/api/amendments",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "amendments"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Vitals_clinical_notes",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-CSRFToken",
+                "value": "TvMPqGu5mrclspf4jRJEZzU4OfNz20x9GhvCgLA0c6QyOdnV8vgjJc3w5W6Gt5r4",
+                "type": "text"
+              },
+              {
+                "key": "Cookie",
+                "value": "v2_DrChrono={%22bid%22:%2288dc8f97-7090-4615-a264-4a3a0f8c281c%22%2C%22storedData%22:{}}; _fbp=fb.1.1770877614762.211033050392495308; intercom-device-id-h7tu7p7y=1096b9a1-f7c9-41e3-8790-cf2e480153ad; _cs_c=1; _ga=GA1.1.1522502473.1770877614; __hs_cookie_cat_pref=1:true_2:true_3:true; hubspotutk=c5ac5a61ab6111e7a27d954d6f883a04; _gcl_au=1.1.1575220875.1778673064; csrftoken=TvMPqGu5mrclspf4jRJEZzU4OfNz20x9GhvCgLA0c6QyOdnV8vgjJc3w5W6Gt5r4; __stripe_mid=631f400b-06c1-448f-a1d5-178a0ccbd1826f852c; __hstc=69138574.c5ac5a61ab6111e7a27d954d6f883a04.1778474218293.1779865727135.1780550896989.9; __hssrc=1; _hp2_id.716008148=%7B%22userId%22%3A%221725550841661149%22%2C%22pageviewId%22%3A%224679962598164563%22%2C%22sessionId%22%3A%223089005443974399%22%2C%22identity%22%3Anull%2C%22trackerVersion%22%3A%224.0%22%7D; _cs_id=575fab3c-e502-a061-87e5-852f97d08a20.1776761820.23.1780550898.1780550898.1.1810925820374.1.x; _ga_HXP79CLH02=GS2.1.s1780550898$o13$g0$t1780550898$j60$l0$h0; _uetsid=31ab9a305fd611f1b3ad51bc28b51b0b|r0srib|2|g6m|0|2346; _uetvid=d3b8e10007db11f1b06313e9291dbc53|mm4azw|1780550899368|1|1|bat.bing.com/p/conversions/c/v; ajs_user_id=ehr_785255; ajs_anonymous_id=649a2afa-12e1-4120-8155-5f96b6eafa5f; AWSALB=cdJ6niCQbHO0sBmi5qskuMPF5s3FwFrihbb3V6g2bBdSNaVyOAuFpWAzu1VP1Avj/bOrFr7XWarc/2jGd2JLgqQ1CVDL5oB13aXGcScZ4uOn/b+/68AEDkJMFQxy; AWSALBCORS=cdJ6niCQbHO0sBmi5qskuMPF5s3FwFrihbb3V6g2bBdSNaVyOAuFpWAzu1VP1Avj/bOrFr7XWarc/2jGd2JLgqQ1CVDL5oB13aXGcScZ4uOn/b+/68AEDkJMFQxy; sessionid=q6pwp2964tvoidmmh044t8tj58p84nyo; _hp2_id.2142786033=%7B%22userId%22%3A%221092294022981034%22%2C%22pageviewId%22%3A%224700800595315202%22%2C%22sessionId%22%3A%221593583039671029%22%2C%22identity%22%3A%22ehr_785255%22%2C%22trackerVersion%22%3A%224.0%22%2C%22identityField%22%3Anull%2C%22isIdentified%22%3A1%2C%22oldIdentity%22%3Anull%7D; fs_lua=1.1780636950007; fs_uid=#V88QV#434f73fb-acff-44c1-aa87-1b7707e26b5c:e13f5346-8d5f-49c9-97c9-e26ffa823178:1780636950007::1#f893b108##/1811396648; _hp2_ses_props.2142786033=%7B%22r%22%3A%22https%3A%2F%2Fapp.drchrono.com%2F%22%2C%22ts%22%3A1780636950209%2C%22d%22%3A%22ragrawal.drchrono.com%22%2C%22h%22%3A%22%2Fclinical_note%2Fedit%2F399000764%2Fall%2Fcustom_7520906%22%7D; intercom-session-h7tu7p7y=VEEvbEY3NWtVcHBvNDZaOEZMVUthdHFURTFIRHBYSDBObXpPWExIUys5M3UzSmFwUG1FbmFiRFZFVC92eTMwY2tscnUzUVpKb2hlVzJvZ1kwSE83VFVmTFhHMVROVU56SDB4SGVLSlhaUDU0d1piMXBXMTJvZzU5cExOejhSZnFpd1l5UlVoWjdxMGgraXE5K1pVSTgzVjdWazM5WFhkeXhLL04wNmNORHhQYVViUWZBR0VzeGQzQWVRc0wrdmhFMURvTzNjbVhHWWdLd2RtN1RjSkk4QT09LS1JOTJpSTBRdGRVMTk0UWp2WGZ3WG5nPT0=--dd73683908068210cc0cc554b0b00f8a2fe4a83a; AWSALBTG=jcai+GyPXUcepzPx9nJKxIu0uBr67YUnkBKuukb04q0SzTZDg69tX+xS++Ti4AJl6PNVePHnkDbw3uToCdSuxTsBcUNZ0V0NJ6cnKjCvFU3Nd1wGKqP4KX5Hke6OI3JtErALXfJlisn6fagkPd3WNIRMJzca60DuZGKaA4A9PPznmLAKRyd2Z41/0QN56frynRnApe7slWBfuOjXL+saGS5GcixzPU6Y61blniBEGwyoMemJGXci9urcZytcqlVwJKk+Cvk=; AWSALBTGCORS=jcai+GyPXUcepzPx9nJKxIu0uBr67YUnkBKuukb04q0SzTZDg69tX+xS++Ti4AJl6PNVePHnkDbw3uToCdSuxTsBcUNZ0V0NJ6cnKjCvFU3Nd1wGKqP4KX5Hke6OI3JtErALXfJlisn6fagkPd3WNIRMJzca60DuZGKaA4A9PPznmLAKRyd2Z41/0QN56frynRnApe7slWBfuOjXL+saGS5GcixzPU6Y61blniBEGwyoMemJGXci9urcZytcqlVwJKk+Cvk=",
+                "type": "text"
+              },
+              {
+                "key": "Referer",
+                "value": "https://ragrawal.drchrono.com/",
+                "type": "text"
+              },
+              {
+                "key": "X-Requested-With",
+                "value": "XMLHttpRequest",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "vital_type_id",
+                  "value": "temperature",
+                  "type": "text"
+                },
+                {
+                  "key": "value",
+                  "value": "70",
+                  "type": "text",
+                  "uuid": "0d94e9e6-5807-4516-9f5f-cba891fef19d"
+                },
+                {
+                  "key": "unit",
+                  "value": "degF",
+                  "type": "text",
+                  "uuid": "70270964-036e-4ba1-b74f-f7e818c15025"
+                },
+                {
+                  "key": "vital_type_id",
+                  "value": "pulse",
+                  "type": "text",
+                  "uuid": "b12a26ae-f6d3-49e5-bd86-e1f5839135d7"
+                },
+                {
+                  "key": "value",
+                  "value": "45",
+                  "type": "text",
+                  "uuid": "1d029aca-ff0b-446a-9cb8-d01fdaff5cea"
+                },
+                {
+                  "key": "unit",
+                  "value": "bpm",
+                  "type": "text",
+                  "uuid": "70270964-036e-4ba1-b74f-f7e818c15025"
+                }
+              ]
+            },
+            "url": {
+              "raw": "https://app.drchrono.com/internal-api/set-vital-value/399000764/",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "internal-api",
+                "set-vital-value",
+                "399000764",
+                ""
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "amendments_read",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "refreshTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "useBrowser",
+                  "value": true,
+                  "type": "boolean"
+                },
+                {
+                  "key": "authUrl",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "http://localhost:8501",
+                  "type": "string"
+                },
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code",
+                  "type": "string"
+                },
+                {
+                  "key": "tokenName",
+                  "value": "DrChrono Token",
+                  "type": "string"
+                },
+                {
+                  "key": "client_authentication",
+                  "value": "header",
+                  "type": "string"
+                },
+                {
+                  "key": "scope",
+                  "value": "patients:read patients:write appointments:read appointments:write clinical:read",
+                  "type": "string"
+                },
+                {
+                  "key": "clientSecret",
+                  "value": "YjmMray2q3OSTO1fcoLWjUQ9gCLSzoHecGvpSWH7Jhx0Cu2vnXFSGQ19lxzZu05KCh3Udr4KKTlrPNJsDJ1OZUsA8kaamiRaaMDv9nQE6kc8wMIRAFMIn3NAxqCl0SQe",
+                  "type": "string"
+                },
+                {
+                  "key": "accessTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "clientId",
+                  "value": "DOHlAsvgN7RxOIdSdX2O2j3Ch6HkJfoMsS0IquYo",
+                  "type": "string"
+                },
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://app.drchrono.com/api/amendments/398995552",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "amendments",
+                "398995552"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Observations_notes_Section",
+      "item": [
+        {
+          "name": "Retrive_Lab_orders",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "refreshTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "useBrowser",
+                  "value": true,
+                  "type": "boolean"
+                },
+                {
+                  "key": "authUrl",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "http://localhost:8501",
+                  "type": "string"
+                },
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code",
+                  "type": "string"
+                },
+                {
+                  "key": "tokenName",
+                  "value": "DrChrono Token",
+                  "type": "string"
+                },
+                {
+                  "key": "client_authentication",
+                  "value": "header",
+                  "type": "string"
+                },
+                {
+                  "key": "scope",
+                  "value": "patients:read patients:write appointments:read appointments:write clinical:read",
+                  "type": "string"
+                },
+                {
+                  "key": "clientSecret",
+                  "value": "YjmMray2q3OSTO1fcoLWjUQ9gCLSzoHecGvpSWH7Jhx0Cu2vnXFSGQ19lxzZu05KCh3Udr4KKTlrPNJsDJ1OZUsA8kaamiRaaMDv9nQE6kc8wMIRAFMIn3NAxqCl0SQe",
+                  "type": "string"
+                },
+                {
+                  "key": "accessTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "clientId",
+                  "value": "DOHlAsvgN7RxOIdSdX2O2j3Ch6HkJfoMsS0IquYo",
+                  "type": "string"
+                },
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://app.drchrono.com/api/patient_lab_results?patient=134441728",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "patient_lab_results"
+              ],
+              "query": [
+                {
+                  "key": "patient",
+                  "value": "134441728"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Creation_Lab_orders",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "useBrowser",
+                  "value": true,
+                  "type": "boolean"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code",
+                  "type": "string"
+                },
+                {
+                  "key": "refreshTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "authUrl",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "tokenName",
+                  "value": "DrChrono Token",
+                  "type": "string"
+                },
+                {
+                  "key": "client_authentication",
+                  "value": "header",
+                  "type": "string"
+                },
+                {
+                  "key": "scope",
+                  "value": "patients:read patients:write appointments:read appointments:write clinical:read",
+                  "type": "string"
+                },
+                {
+                  "key": "clientSecret",
+                  "value": "YjmMray2q3OSTO1fcoLWjUQ9gCLSzoHecGvpSWH7Jhx0Cu2vnXFSGQ19lxzZu05KCh3Udr4KKTlrPNJsDJ1OZUsA8kaamiRaaMDv9nQE6kc8wMIRAFMIn3NAxqCl0SQe",
+                  "type": "string"
+                },
+                {
+                  "key": "accessTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "clientId",
+                  "value": "DOHlAsvgN7RxOIdSdX2O2j3Ch6HkJfoMsS0IquYo",
+                  "type": "string"
+                },
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"ordering_doctor\": 525460,\r\n  \"patient\": 134441728,\r\n  \"title\": \"Blood Pressure Systolice\",\r\n  \"loinc_code\": \"8480-6\",\r\n  \"lab_result_value\": \"110 mg/dL. Fasting blood glucose measurement collected during routine metabolic assessment. Sample integrity verified and result successfully imported through API integration workflow.\",\r\n  \"lab_result_value_as_float\": 110.0,\r\n  \"lab_result_value_units\": \"mg/dL\",\r\n  \"lab_normal_range\": \"70-100\",\r\n  \"lab_normal_range_units\": \"mg/dL\",\r\n  \"lab_abnormal_flag\": \"H\",\r\n  \"date_test_performed\": \"2026-06-1T00:00:00\",\r\n  \"doctor_signoff\": false,\r\n  \"doctor_comments\": \"Patient presented in fasting state prior to specimen collection. Blood sample obtained without complications. Glucose result is mildly elevated above the established reference range. Clinical correlation is recommended based on patient history, current medications, dietary habits, and previous laboratory trends. No specimen quality issues were reported. Result was received and entered through the API integration testing workflow to validate observation and observation note persistence within the patient laboratory results module.\",\r\n  \"lab_order_status\": \"Order Entered\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "https://app.drchrono.com/api/patient_lab_results",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "patient_lab_results"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Observations_Section",
+      "item": [
+        {
+          "name": "Retrive_Lab_orders",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "refreshTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "useBrowser",
+                  "value": true,
+                  "type": "boolean"
+                },
+                {
+                  "key": "authUrl",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "http://localhost:8501",
+                  "type": "string"
+                },
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code",
+                  "type": "string"
+                },
+                {
+                  "key": "tokenName",
+                  "value": "DrChrono Token",
+                  "type": "string"
+                },
+                {
+                  "key": "client_authentication",
+                  "value": "header",
+                  "type": "string"
+                },
+                {
+                  "key": "scope",
+                  "value": "patients:read patients:write appointments:read appointments:write clinical:read",
+                  "type": "string"
+                },
+                {
+                  "key": "clientSecret",
+                  "value": "YjmMray2q3OSTO1fcoLWjUQ9gCLSzoHecGvpSWH7Jhx0Cu2vnXFSGQ19lxzZu05KCh3Udr4KKTlrPNJsDJ1OZUsA8kaamiRaaMDv9nQE6kc8wMIRAFMIn3NAxqCl0SQe",
+                  "type": "string"
+                },
+                {
+                  "key": "accessTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "clientId",
+                  "value": "DOHlAsvgN7RxOIdSdX2O2j3Ch6HkJfoMsS0IquYo",
+                  "type": "string"
+                },
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://app.drchrono.com/api/patient_lab_results?patient=134441728",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "patient_lab_results"
+              ],
+              "query": [
+                {
+                  "key": "patient",
+                  "value": "134441728"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Creation_Lab_orders",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "useBrowser",
+                  "value": true,
+                  "type": "boolean"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code",
+                  "type": "string"
+                },
+                {
+                  "key": "refreshTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "authUrl",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "tokenName",
+                  "value": "DrChrono Token",
+                  "type": "string"
+                },
+                {
+                  "key": "client_authentication",
+                  "value": "header",
+                  "type": "string"
+                },
+                {
+                  "key": "scope",
+                  "value": "patients:read patients:write appointments:read appointments:write clinical:read",
+                  "type": "string"
+                },
+                {
+                  "key": "clientSecret",
+                  "value": "YjmMray2q3OSTO1fcoLWjUQ9gCLSzoHecGvpSWH7Jhx0Cu2vnXFSGQ19lxzZu05KCh3Udr4KKTlrPNJsDJ1OZUsA8kaamiRaaMDv9nQE6kc8wMIRAFMIn3NAxqCl0SQe",
+                  "type": "string"
+                },
+                {
+                  "key": "accessTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "clientId",
+                  "value": "DOHlAsvgN7RxOIdSdX2O2j3Ch6HkJfoMsS0IquYo",
+                  "type": "string"
+                },
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"ordering_doctor\": 525460,\r\n  \"patient\": 134441728,\r\n  \"title\": \"Blood Pressure Systolice\",\r\n  \"loinc_code\": \"8480-6\",\r\n  \"lab_result_value\": \"110 mg/dL. Fasting blood glucose measurement collected during routine metabolic assessment. Sample integrity verified and result successfully imported through API integration workflow.\",\r\n  \"lab_result_value_as_float\": 110.0,\r\n  \"lab_result_value_units\": \"mg/dL\",\r\n  \"lab_normal_range\": \"70-100\",\r\n  \"lab_normal_range_units\": \"mg/dL\",\r\n  \"lab_abnormal_flag\": \"H\",\r\n  \"date_test_performed\": \"2026-06-1T00:00:00\",\r\n  \"doctor_signoff\": false,\r\n  \"doctor_comments\": \"Patient presented in fasting state prior to specimen collection. Blood sample obtained without complications. Glucose result is mildly elevated above the established reference range. Clinical correlation is recommended based on patient history, current medications, dietary habits, and previous laboratory trends. No specimen quality issues were reported. Result was received and entered through the API integration testing workflow to validate observation and observation note persistence within the patient laboratory results module.\",\r\n  \"lab_order_status\": \"Order Entered\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "https://app.drchrono.com/api/patient_lab_results",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "patient_lab_results"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Care_plan_Section",
+      "item": [
+        {
+          "name": "Retrive_care_plans",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "refreshTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "useBrowser",
+                  "value": true,
+                  "type": "boolean"
+                },
+                {
+                  "key": "authUrl",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "http://localhost:8501",
+                  "type": "string"
+                },
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code",
+                  "type": "string"
+                },
+                {
+                  "key": "tokenName",
+                  "value": "DrChrono Token",
+                  "type": "string"
+                },
+                {
+                  "key": "client_authentication",
+                  "value": "header",
+                  "type": "string"
+                },
+                {
+                  "key": "scope",
+                  "value": "patients:read patients:write appointments:read appointments:write clinical:read",
+                  "type": "string"
+                },
+                {
+                  "key": "clientSecret",
+                  "value": "YjmMray2q3OSTO1fcoLWjUQ9gCLSzoHecGvpSWH7Jhx0Cu2vnXFSGQ19lxzZu05KCh3Udr4KKTlrPNJsDJ1OZUsA8kaamiRaaMDv9nQE6kc8wMIRAFMIn3NAxqCl0SQe",
+                  "type": "string"
+                },
+                {
+                  "key": "accessTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "clientId",
+                  "value": "DOHlAsvgN7RxOIdSdX2O2j3Ch6HkJfoMsS0IquYo",
+                  "type": "string"
+                },
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://app.drchrono.com/api/care_plans",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "care_plans"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "care_plan_id",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "refreshTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "useBrowser",
+                  "value": true,
+                  "type": "boolean"
+                },
+                {
+                  "key": "authUrl",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "http://localhost:8501",
+                  "type": "string"
+                },
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code",
+                  "type": "string"
+                },
+                {
+                  "key": "tokenName",
+                  "value": "DrChrono Token",
+                  "type": "string"
+                },
+                {
+                  "key": "client_authentication",
+                  "value": "header",
+                  "type": "string"
+                },
+                {
+                  "key": "scope",
+                  "value": "patients:read patients:write appointments:read appointments:write clinical:read",
+                  "type": "string"
+                },
+                {
+                  "key": "clientSecret",
+                  "value": "YjmMray2q3OSTO1fcoLWjUQ9gCLSzoHecGvpSWH7Jhx0Cu2vnXFSGQ19lxzZu05KCh3Udr4KKTlrPNJsDJ1OZUsA8kaamiRaaMDv9nQE6kc8wMIRAFMIn3NAxqCl0SQe",
+                  "type": "string"
+                },
+                {
+                  "key": "accessTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "clientId",
+                  "value": "DOHlAsvgN7RxOIdSdX2O2j3Ch6HkJfoMsS0IquYo",
+                  "type": "string"
+                },
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://app.drchrono.com/api/care_plans/101821",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "care_plans",
+                "101821"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "care_plan",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "refreshTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "useBrowser",
+                  "value": true,
+                  "type": "boolean"
+                },
+                {
+                  "key": "authUrl",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "http://localhost:8501",
+                  "type": "string"
+                },
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code",
+                  "type": "string"
+                },
+                {
+                  "key": "tokenName",
+                  "value": "DrChrono Token",
+                  "type": "string"
+                },
+                {
+                  "key": "client_authentication",
+                  "value": "header",
+                  "type": "string"
+                },
+                {
+                  "key": "scope",
+                  "value": "patients:read patients:write appointments:read appointments:write clinical:read",
+                  "type": "string"
+                },
+                {
+                  "key": "clientSecret",
+                  "value": "YjmMray2q3OSTO1fcoLWjUQ9gCLSzoHecGvpSWH7Jhx0Cu2vnXFSGQ19lxzZu05KCh3Udr4KKTlrPNJsDJ1OZUsA8kaamiRaaMDv9nQE6kc8wMIRAFMIn3NAxqCl0SQe",
+                  "type": "string"
+                },
+                {
+                  "key": "accessTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "clientId",
+                  "value": "DOHlAsvgN7RxOIdSdX2O2j3Ch6HkJfoMsS0IquYo",
+                  "type": "string"
+                },
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"patient\": 134441728,\r\n  \"appointment\": 399409800,\r\n  \"title\": \"Diabetes Management Plan\",\r\n  \"description\": \"Patient diagnosed with Type 2 Diabetes.\",\r\n  \"instructions\": \"Monitor glucose twice daily and follow diabetic diet.\",\r\n  \"code\": \"44054006\",\r\n  \"code_system\": \"SNOMED\",\r\n  \"plan_type\": 1,\r\n  \"scheduled_date\": \"2026-06-15\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "https://app.drchrono.com/api/care_plans",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "care_plans"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Procedures_Section",
+      "item": [
+        {
+          "name": "list_of_procedures",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://ragrawal.drchrono.com/custom/procedure/list",
+              "protocol": "https",
+              "host": [
+                "ragrawal",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "custom",
+                "procedure",
+                "list"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "patient_interventions_list",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "refreshTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "useBrowser",
+                  "value": true,
+                  "type": "boolean"
+                },
+                {
+                  "key": "authUrl",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "http://localhost:8501",
+                  "type": "string"
+                },
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code",
+                  "type": "string"
+                },
+                {
+                  "key": "tokenName",
+                  "value": "DrChrono Token",
+                  "type": "string"
+                },
+                {
+                  "key": "client_authentication",
+                  "value": "header",
+                  "type": "string"
+                },
+                {
+                  "key": "scope",
+                  "value": "patients:read patients:write appointments:read appointments:write clinical:read",
+                  "type": "string"
+                },
+                {
+                  "key": "clientSecret",
+                  "value": "YjmMray2q3OSTO1fcoLWjUQ9gCLSzoHecGvpSWH7Jhx0Cu2vnXFSGQ19lxzZu05KCh3Udr4KKTlrPNJsDJ1OZUsA8kaamiRaaMDv9nQE6kc8wMIRAFMIn3NAxqCl0SQe",
+                  "type": "string"
+                },
+                {
+                  "key": "accessTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "clientId",
+                  "value": "DOHlAsvgN7RxOIdSdX2O2j3Ch6HkJfoMsS0IquYo",
+                  "type": "string"
+                },
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://app.drchrono.com/api/patient_interventions",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "patient_interventions"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "patient_interventions_list",
+          "request": {
+            "auth": {
+              "type": "oauth2",
+              "oauth2": [
+                {
+                  "key": "refreshTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "useBrowser",
+                  "value": true,
+                  "type": "boolean"
+                },
+                {
+                  "key": "authUrl",
+                  "value": "https://drchrono.com/o/authorize/",
+                  "type": "string"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "http://localhost:8501",
+                  "type": "string"
+                },
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code",
+                  "type": "string"
+                },
+                {
+                  "key": "tokenName",
+                  "value": "DrChrono Token",
+                  "type": "string"
+                },
+                {
+                  "key": "client_authentication",
+                  "value": "header",
+                  "type": "string"
+                },
+                {
+                  "key": "scope",
+                  "value": "patients:read patients:write appointments:read appointments:write clinical:read",
+                  "type": "string"
+                },
+                {
+                  "key": "clientSecret",
+                  "value": "YjmMray2q3OSTO1fcoLWjUQ9gCLSzoHecGvpSWH7Jhx0Cu2vnXFSGQ19lxzZu05KCh3Udr4KKTlrPNJsDJ1OZUsA8kaamiRaaMDv9nQE6kc8wMIRAFMIn3NAxqCl0SQe",
+                  "type": "string"
+                },
+                {
+                  "key": "accessTokenUrl",
+                  "value": "https://drchrono.com/o/token/",
+                  "type": "string"
+                },
+                {
+                  "key": "clientId",
+                  "value": "DOHlAsvgN7RxOIdSdX2O2j3Ch6HkJfoMsS0IquYo",
+                  "type": "string"
+                },
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"appointment\": 399409800,\r\n  \"doctor\": 525460,\r\n  \"patient\": 134441728,\r\n  \"code\": \"99401\",\r\n  \"code_system\": \"CPT\",\r\n  \"name\": \"Preventive medicine counseling and/or risk factor reduction intervention(s) provided to an individual (separate procedure); approximately 15 minutes\",\r\n  \"value_code\": \"\",\r\n  \"value_code_system\": \"\",\r\n  \"value_name\": \"Procedure completed\",\r\n  \"effective_time\": \"2026-06-09T10:00:00\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "https://app.drchrono.com/api/patient_interventions",
+              "protocol": "https",
+              "host": [
+                "app",
+                "drchrono",
+                "com"
+              ],
+              "path": [
+                "api",
+                "patient_interventions"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "DrChrono_Access_token",
+      "request": {
+        "auth": {
+          "type": "oauth2",
+          "oauth2": [
+            {
+              "key": "useBrowser",
+              "value": true,
+              "type": "boolean"
+            },
+            {
+              "key": "redirect_uri",
+              "value": "https://drchrono.com/o/authorize/",
+              "type": "string"
+            },
+            {
+              "key": "grant_type",
+              "value": "authorization_code",
+              "type": "string"
+            },
+            {
+              "key": "refreshTokenUrl",
+              "value": "https://drchrono.com/o/token/",
+              "type": "string"
+            },
+            {
+              "key": "authUrl",
+              "value": "https://drchrono.com/o/authorize/",
+              "type": "string"
+            },
+            {
+              "key": "tokenName",
+              "value": "DrChrono Token",
+              "type": "string"
+            },
+            {
+              "key": "client_authentication",
+              "value": "header",
+              "type": "string"
+            },
+            {
+              "key": "scope",
+              "value": "patients:read patients:write appointments:read appointments:write clinical:read",
+              "type": "string"
+            },
+            {
+              "key": "clientSecret",
+              "value": "YjmMray2q3OSTO1fcoLWjUQ9gCLSzoHecGvpSWH7Jhx0Cu2vnXFSGQ19lxzZu05KCh3Udr4KKTlrPNJsDJ1OZUsA8kaamiRaaMDv9nQE6kc8wMIRAFMIn3NAxqCl0SQe",
+              "type": "string"
+            },
+            {
+              "key": "accessTokenUrl",
+              "value": "https://drchrono.com/o/token/",
+              "type": "string"
+            },
+            {
+              "key": "clientId",
+              "value": "DOHlAsvgN7RxOIdSdX2O2j3Ch6HkJfoMsS0IquYo",
+              "type": "string"
+            },
+            {
+              "key": "addTokenTo",
+              "value": "header",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": ""
+        }
+      },
+      "response": []
+    }
+  ],
+  "auth": {
+    "type": "oauth2",
+    "oauth2": [
+      {
+        "key": "useBrowser",
+        "value": false,
+        "type": "boolean"
+      },
+      {
+        "key": "redirect_uri",
+        "value": "https://oauth.pstmn.io/v1/callback",
+        "type": "string"
+      },
+      {
+        "key": "refreshRequestParams",
+        "value": [],
+        "type": "any"
+      },
+      {
+        "key": "tokenRequestParams",
+        "value": [],
+        "type": "any"
+      },
+      {
+        "key": "authRequestParams",
+        "value": [],
+        "type": "any"
+      },
+      {
+        "key": "tokenName",
+        "value": "DrChrono Token",
+        "type": "string"
+      },
+      {
+        "key": "challengeAlgorithm",
+        "value": "S256",
+        "type": "string"
+      },
+      {
+        "key": "scope",
+        "value": "patients:read patients:write appointments:read appointments:write clinical:read",
+        "type": "string"
+      },
+      {
+        "key": "grant_type",
+        "value": "authorization_code",
+        "type": "string"
+      },
+      {
+        "key": "clientSecret",
+        "value": "YjmMray2q3OSTO1fcoLWjUQ9gCLSzoHecGvpSWH7Jhx0Cu2vnXFSGQ19lxzZu05KCh3Udr4KKTlrPNJsDJ1OZUsA8kaamiRaaMDv9nQE6kc8wMIRAFMIn3NAxqCl0SQe",
+        "type": "string"
+      },
+      {
+        "key": "clientId",
+        "value": "DOHlAsvgN7RxOIdSdX2O2j3Ch6HkJfoMsS0IquYo",
+        "type": "string"
+      },
+      {
+        "key": "authUrl",
+        "value": "https://drchrono.com/o/authorize/",
+        "type": "string"
+      },
+      {
+        "key": "addTokenTo",
+        "value": "header",
+        "type": "string"
+      },
+      {
+        "key": "client_authentication",
+        "value": "header",
+        "type": "string"
+      },
+      {
+        "key": "accessTokenUrl",
+        "value": "https://drchrono.com/o/token/",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "packages": {},
+        "requests": {},
+        "exec": [
+          ""
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "packages": {},
+        "requests": {},
+        "exec": [
+          ""
+        ]
+      }
+    }
+  ]
+}
