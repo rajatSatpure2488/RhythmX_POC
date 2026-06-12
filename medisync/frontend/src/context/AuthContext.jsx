@@ -3,6 +3,11 @@ import { getAuthStatus, initiateOAuthFlow, setManualTokenAPI, exchangeCode, logi
 
 const AuthContext = createContext(null)
 
+// Module-level guard (survives StrictMode double-mount / remounts) so a single-use
+// DrChrono authorization code is never exchanged twice — the 2nd exchange would fail
+// with invalid_grant even though the 1st succeeded.
+const _processedCodes = new Set()
+
 /**
  * Auth persistence strategy:
  *  - sessionStorage only — cleared automatically when the browser tab/window closes
@@ -114,7 +119,8 @@ export function AuthProvider({ children }) {
       return
     }
 
-    if (code) {
+    if (code && !_processedCodes.has(code)) {
+      _processedCodes.add(code)                       // exchange this code at most once
       window.history.replaceState({}, '', window.location.pathname)
       setAuth(prev => ({ ...prev, status: 'connecting' }))
       exchangeCode(code)
@@ -125,7 +131,24 @@ export function AuthProvider({ children }) {
           expiresIn: data.expires_in, lastHandshake: data.last_handshake,
           status: 'connected', error: null,
         })))
-        .catch(err => setAuth(prev => ({ ...prev, status: 'error', error: err.message || 'Token exchange failed' })))
+        .catch(err => {
+          // A failed exchange (e.g. invalid_grant from a duplicate/expired code) might
+          // still mean we're connected — the backend may already hold a valid token.
+          // Confirm via /auth/status before surfacing an error.
+          getAuthStatus()
+            .then(s => {
+              if (s && s.connected) {
+                setAuth(prev => ({
+                  ...prev, connected: true,
+                  doctorId: s.doctor_id, doctorName: s.doctor_name,
+                  expiresIn: s.expires_in, status: 'connected', error: null,
+                }))
+              } else {
+                setAuth(prev => ({ ...prev, status: 'error', error: err.message || 'Token exchange failed' }))
+              }
+            })
+            .catch(() => setAuth(prev => ({ ...prev, status: 'error', error: err.message || 'Token exchange failed' })))
+        })
     }
   }, []) // eslint-disable-line
 

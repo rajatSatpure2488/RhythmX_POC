@@ -7,6 +7,7 @@ was or wasn't recognized and how to fix it.
 import io
 import csv
 import json
+import hashlib
 import re
 import zipfile
 from pathlib import Path
@@ -246,10 +247,72 @@ def _guess_resource_type(rtype_or_name: str) -> str:
     return stem if stem else "unknown"
 
 
+# Stable business-identifier fields, tried in order, to detect a duplicate record.
+# fhir_id / revision_id are intentionally excluded — they get regenerated, which is
+# exactly why one patient was showing up as several rows.
+_IDENTITY_FIELDS = [
+    "observation_id", "encounter_id", "appointment_id", "note_id",
+    "diagnostic_report_id", "report_id", "medication_id", "condition_id",
+    "allergy_id", "coverage_id", "procedure_id", "immunization_id",
+    "service_request_id", "source_note_id", "source_encounter_id",
+    "medical_record_number", "patient_id", "rx_patient_id", "id",
+]
+# Volatile/generated columns ignored when content-hashing rows without a stable id.
+_VOLATILE_FIELDS = {
+    "fhir_id", "revision_id", "created_dt", "updated_dt",
+    "fhir_last_queried", "clinicaldata_last_updated_dt",
+}
+
+
+def _record_identity(rec: dict) -> str:
+    """A stable identity for a record so the same logical row is never stored twice.
+
+    Identity is VALUE-based (not field-name based): the same MRN/id collapses whether
+    it arrives as medical_record_number, patient_id, rx_patient_id, a FHIR identifier,
+    or name+dob — across CSV and FHIR shapes. fhir_id/revision_id are ignored because
+    they get regenerated (the cause of one patient showing as several rows)."""
+    # FHIR-style identifier list: [{system, value}, ...]
+    ident = rec.get("identifier")
+    if isinstance(ident, list):
+        for i in ident:
+            if isinstance(i, dict) and i.get("value"):
+                return "id:" + str(i["value"]).strip().lower()
+    for f in _IDENTITY_FIELDS:
+        v = rec.get(f)
+        if v not in (None, ""):
+            return "id:" + str(v).strip().lower()
+    # Same person across formats: name + date of birth.
+    name = "".join(str(rec.get(k, "")) for k in ("first_name", "last_name", "name")).strip().lower()
+    dob = str(rec.get("date_of_birth") or rec.get("birthDate") or rec.get("dob") or "").strip()[:10]
+    if name and dob:
+        return "namedob:" + name + "|" + dob
+    stable = {k: v for k, v in rec.items() if k not in _VOLATILE_FIELDS}
+    return "hash:" + hashlib.md5(json.dumps(stable, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+
+
+def _field_count(rec: dict) -> int:
+    """Number of populated fields — used to keep the more complete of two duplicates."""
+    return sum(1 for v in rec.values() if v not in (None, "", [], {}))
+
+
 def _merge(base: dict, extra: dict) -> dict:
+    """Merge parsed records into the session, de-duplicating by stable identity so a
+    record uploaded/processed more than once never appears as multiple rows. On a
+    collision the MORE COMPLETE record wins (e.g. the copy that carries the fhir_id)."""
     for key, records in extra.items():
-        if records:
-            base.setdefault(key, []).extend(records)
+        if not records:
+            continue
+        bucket = base.setdefault(key, [])
+        index = {_record_identity(r): pos for pos, r in enumerate(bucket)}
+        for rec in records:
+            ident = _record_identity(rec)
+            if ident in index:
+                pos = index[ident]
+                if _field_count(rec) > _field_count(bucket[pos]):
+                    bucket[pos] = rec  # keep the richer record
+                continue
+            index[ident] = len(bucket)
+            bucket.append(rec)
     return base
 
 

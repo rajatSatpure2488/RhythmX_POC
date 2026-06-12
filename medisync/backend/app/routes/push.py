@@ -2413,11 +2413,12 @@ def _push_clinical_note_yellow_notepad(
         # Fallback: look the appointment up live from DrChrono by patient + date.
         appt_id = _lookup_appointment_id(token, patient_id, note.get("note_date"))
     if not appt_id:
-        return {"success": False, "status_code": 0, "drchrono_id": None,
-                "error": "No DrChrono appointment found for this note. Push the patient's "
-                         "encounter/appointment first (any run), or ensure the appointment "
-                         "exists in DrChrono for that date.",
-                "already_exists": False, "retryable": True}
+        # No appointment exists for this note (e.g. its encounter is pre-2000 and was
+        # never created as an appointment). Don't drop the note — upload its content as
+        # a PDF document so it still lands in the patient chart.
+        log.info("Clinical note %s has no appointment — uploading as a document instead.",
+                 note.get("source_note_id"))
+        return _upload_clinical_note_as_document(note, token, doctor_id, patient_id)
 
     content = _build_note_content(note)
 
@@ -2656,11 +2657,21 @@ def _upload_observation_as_document(
 _OBS_NOTE_INDEX: dict = {}
 _OBS_HAS_OBS = {"value": False}
 
-# DrChrono lab_order_status valid choices do NOT include "Resulted"/"Cancelled".
-# "In Progress" is confirmed valid; completed results map to "Reviewed".
+# Valid DrChrono lab_order_status choices (exactly the EHR dropdown values).
+_VALID_LAB_STATUSES = (
+    "Order Entered", "Discontinued", "In Progress",
+    "Results Received", "Results Reviewed with Patient", "Paper Order",
+)
+# Map a FHIR observation status -> a valid DrChrono lab_order_status.
 _LAB_STATUS_MAP = {
-    "final": "Reviewed", "preliminary": "In Progress", "amended": "Reviewed",
-    "cancelled": "In Progress", "unknown": "In Progress",
+    "final": "Results Received",
+    "amended": "Results Received",
+    "corrected": "Results Received",
+    "preliminary": "In Progress",
+    "registered": "Order Entered",
+    "cancelled": "Discontinued",
+    "entered-in-error": "Discontinued",
+    "unknown": "In Progress",
 }
 
 
@@ -2677,8 +2688,16 @@ def _prepare_obs_lab_index(source: dict, ordered: list) -> None:
     _OBS_HAS_OBS["value"] = any(k in ordered for k in ("observation", "observations"))
 
 
-def _lab_order_status(status) -> str:
-    return _LAB_STATUS_MAP.get(str(status or "").strip().lower(), "In Progress")
+def _lab_order_status(obs: dict) -> str:
+    """Resolve a valid DrChrono lab_order_status. A CSV column already holding a valid
+    value (lab_order_status / order_status) wins; otherwise map the observation status."""
+    direct = _first_present(obs, "lab_order_status", "order_status")
+    if direct:
+        d = str(direct).strip()
+        for valid in _VALID_LAB_STATUSES:
+            if d.lower() == valid.lower():
+                return valid
+    return _LAB_STATUS_MAP.get(str(_first_present(obs, "status") or "").strip().lower(), "In Progress")
 
 
 def _lab_value_float(value):
@@ -2775,7 +2794,7 @@ def _build_lab_result_payload(obs: dict, note: Optional[dict],
             _first_present(obs, "reference_max"),
             _first_present(note, "data_absent_reason") or _first_present(obs, "data_absent_reason"),
         ),
-        "lab_order_status": _lab_order_status(_first_present(obs, "status")),
+        "lab_order_status": _lab_order_status(obs),
         # DrChrono requires a full ISO-8601 datetime (YYYY-MM-DDThh:mm:ss), not a date.
         "date_test_performed": _normalize_datetime(
             _first_present(obs, "effective_dt", "issued_dt", "date_collected", "note_date")
@@ -2922,6 +2941,75 @@ def _get_default_office(token: str, doctor_id: Optional[int]) -> tuple[Optional[
     return office_id, exam_room
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# Appointment / Encounter idempotency registry
+# ═══════════════════════════════════════════════════════════════════════════════
+# Maps a source appointment_id / encounter_id -> the DrChrono appointment_id created
+# for it, persisted to disk so repeated pushes are idempotent (no duplicate records),
+# even across backend restarts.
+_APPT_REGISTRY: dict = {}
+_APPT_REGISTRY_FILE = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),  # -> backend/
+    "appointment_registry.json",
+)
+
+
+def _load_appt_registry() -> dict:
+    try:
+        with open(_APPT_REGISTRY_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, dict) else {}
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+
+
+def _save_appt_registry(reg: dict) -> None:
+    try:
+        with open(_APPT_REGISTRY_FILE, "w", encoding="utf-8") as f:
+            json.dump(reg, f, indent=2)
+    except OSError as e:
+        log.warning("Could not persist appointment registry: %s", e)
+
+
+def _load_registry_into_memory() -> None:
+    """Load the persisted registry at the start of a push run, so existence checks and
+    clinical-note appointment resolution survive restarts."""
+    _APPT_REGISTRY.clear()
+    _APPT_REGISTRY.update(_load_appt_registry())
+    _APPT_ID_MAP.update(_APPT_REGISTRY)
+
+
+def _appt_source_id(record: dict, key: str) -> str:
+    """The external id used to determine appointment/encounter uniqueness."""
+    if key in ("encounter", "encounters"):
+        return str(_first_present(record, "source_encounter_id", "encounter_id", "id") or "").strip()
+    return str(_first_present(record, "source_appointment_id", "appointment_id", "id") or "").strip()
+
+
+def _appt_already_exists(record: dict, key: str) -> Optional[dict]:
+    """Idempotency check — if this appointment/encounter was already created, return an
+    'already exists' result (no duplicate POST). Returns None if it's new."""
+    src = _appt_source_id(record, key)
+    if not src or src not in _APPT_REGISTRY:
+        return None
+    is_enc = key in ("encounter", "encounters")
+    msg = "Encounter already exists" if is_enc else "Appointment already exists"
+    log.info("Idempotent skip: %s (source_id=%s -> appt %s)", msg, src, _APPT_REGISTRY[src])
+    return {
+        "success": True, "status_code": 200, "drchrono_id": _APPT_REGISTRY[src],
+        "error": "", "already_exists": True, "message": msg, "detail": msg,
+    }
+
+
+def _register_appt(record: dict, key: str, drchrono_id) -> None:
+    """Record a newly-created appointment/encounter so future pushes are idempotent."""
+    src = _appt_source_id(record, key)
+    if src and drchrono_id:
+        _APPT_REGISTRY[src] = drchrono_id
+        _APPT_ID_MAP[src] = drchrono_id
+        _save_appt_registry(_APPT_REGISTRY)
+
+
 def _live_push_record(
     record: dict,
     resource: str,
@@ -2999,6 +3087,13 @@ def _live_push_record(
             "error": f"Mapping error: {e}",
             "already_exists": False,
         }
+
+    # Idempotency: if this appointment/encounter id was already created, skip the
+    # create and return an 'already exists' response (no duplicate in DrChrono).
+    if key in ("encounter", "encounters", "appointment", "appointments"):
+        existing = _appt_already_exists(record, key)
+        if existing:
+            return existing
 
     # Appointments require a real DrChrono office ID. If the source data didn't
     # carry one, resolve the doctor's default office (cached) and fill it in.
@@ -3082,6 +3177,9 @@ def _live_push_record(
 
         if resp.status_code in (200, 201):
             body = resp.json()
+            # Record appointment/encounter creation so repeat pushes are idempotent.
+            if key in ("encounter", "encounters", "appointment", "appointments"):
+                _register_appt(record, key, body.get("id"))
             return {
                 "success": True,
                 "status_code": resp.status_code,
@@ -3258,8 +3356,9 @@ async def push_run(req: PushRequest):
 
     stats = {}
     current_patient_id = req.patient_id
-    # _APPT_ID_MAP persists across runs in this process so notes can resolve
-    # appointments pushed in an earlier run; a live DrChrono lookup is the fallback.
+    # Load the persisted appointment/encounter registry so existence checks (and
+    # clinical-note appointment resolution) work across runs and restarts.
+    _load_registry_into_memory()
     _prepare_obs_lab_index(source, ordered)  # index notes; decide merge vs standalone
 
     for key in ordered:
@@ -3389,6 +3488,7 @@ def push_run_stream(req: PushRequest):
     ordered = [k for k in _PUSH_ORDER if k in target_keys]
     ordered += [k for k in target_keys if k not in ordered]
 
+    _load_registry_into_memory()  # appointment/encounter idempotency, across restarts
     _prepare_obs_lab_index(source, ordered)  # index notes; decide merge vs standalone
 
     def generate():

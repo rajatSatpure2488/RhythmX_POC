@@ -484,12 +484,16 @@ export default function Ingestion({ onComplete }) {
           onDrop={onDrop}
           onDragOver={e => { e.preventDefault(); setDragging(true) }}
           onDragLeave={() => setDragging(false)}
-          onClick={() => !displayFiles.length && inputRef.current?.click()}
+          onClick={e => { if (e.target === e.currentTarget && !displayFiles.length) inputRef.current?.click() }}
         >
+          {/* Reset value after each pick so the same folder/file can be re-selected and
+              the picker never re-fires from a stale value. */}
           <input ref={inputRef} type="file" multiple accept=".zip,.csv,.json,.hl7,.txt"
-            style={{ display:'none' }} onChange={e => addFiles(e.target.files)} />
+            style={{ display:'none' }}
+            onChange={e => { addFiles(e.target.files); e.target.value = '' }} />
           <input ref={folderRef} type="file" multiple webkitdirectory="true" directory="true"
-            style={{ display:'none' }} onChange={e => addFiles(e.target.files)} />
+            style={{ display:'none' }}
+            onChange={e => { addFiles(e.target.files); e.target.value = '' }} />
 
           {!displayFiles.length ? (
             <div className="drop-zone__empty">
