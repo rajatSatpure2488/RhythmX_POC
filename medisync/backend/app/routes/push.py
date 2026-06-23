@@ -924,14 +924,29 @@ from typing import Any, List, Optional
 
 import requests
 from fastapi import APIRouter, HTTPException, File, Form, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from app.core import config
 from app.routes.upload import _SESSION
 from app.services.token_store import token_store
 from app.services.drchrono_proxy import drchrono_post_document
+from app.services.logging_service import LoggingService, get_last_run, set_last_run
 log = logging.getLogger("medisync.push")
+
+
+def _endpoint_for(key: str) -> str:
+    """Human-readable DrChrono endpoint for a resource key, for record logs."""
+    path = ENDPOINT_MAP.get(key.lower())
+    return f"/api/{path}" if path else key
+
+
+def _payload_for_logging(key: str, record: dict, doctor_id, patient_id) -> Any:
+    """Best-effort request payload for record-level logs. Pure/no network; never raises."""
+    try:
+        return _map_record(key, record, doctor_id=doctor_id, patient_id=patient_id)
+    except Exception:
+        return None
 
 router = APIRouter()
 
@@ -973,8 +988,8 @@ ENDPOINT_MAP = {
     "documents": "documents",
     "document_reference": "documents",
     "document_references": "documents",
-    "clinical_note": "yellow_notepad",
-    "clinical_notes": "yellow_notepad",
+    "clinical_note": "clinical_note_field_values",
+    "clinical_notes": "clinical_note_field_values",
 }
 
 # DrChrono accepts only Male / Female / Other (NOT "Unknown" — it 400s).
@@ -1138,6 +1153,156 @@ def _first_present(record: dict, *keys: str, default: Any = "") -> Any:
     return default
 
 
+def _clean_nested(value: Any) -> Any:
+    if isinstance(value, dict):
+        cleaned = {k: _clean_nested(v) for k, v in value.items()}
+        return {k: v for k, v in cleaned.items() if v not in (None, "", [], {})}
+    if isinstance(value, list):
+        cleaned = [_clean_nested(v) for v in value]
+        return [v for v in cleaned if v not in (None, "", [], {})]
+    return value
+
+
+def _first_related(record: dict, *keys: str) -> dict:
+    for key in keys:
+        value = record.get(key)
+        if isinstance(value, list):
+            for item in value:
+                if isinstance(item, dict) and item:
+                    return item
+        if isinstance(value, dict) and value:
+            return value
+    return {}
+
+
+def _human_name_parts(value: Any) -> dict:
+    if isinstance(value, list):
+        value = next((n for n in value if isinstance(n, dict) and n.get("use") == "official"), value[0] if value else {})
+    if isinstance(value, str):
+        parts = value.strip().split()
+        return {
+            "first_name": parts[0] if parts else "",
+            "last_name": parts[-1] if len(parts) > 1 else "",
+            "middle_name": " ".join(parts[1:-1]) if len(parts) > 2 else "",
+        }
+    if not isinstance(value, dict):
+        return {}
+    given = value.get("given") or []
+    if not isinstance(given, list):
+        given = [given]
+    return {
+        "first_name": str(given[0]).strip() if given else "",
+        "middle_name": " ".join(str(x).strip() for x in given[1:] if str(x).strip()),
+        "last_name": str(value.get("family") or "").strip(),
+        "suffix": " ".join(str(x).strip() for x in (value.get("suffix") or []) if str(x).strip())
+        if isinstance(value.get("suffix"), list) else str(value.get("suffix") or "").strip(),
+        "nick_name": str(value.get("text") or "").strip() if value.get("use") == "nickname" else "",
+    }
+
+
+def _contact_points(items: Any) -> dict:
+    out = {}
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        system = str(item.get("system") or "").lower()
+        use = str(item.get("use") or "").lower()
+        value = item.get("value")
+        if not value:
+            continue
+        if system == "email" and not out.get("email"):
+            out["email"] = value
+        elif system == "phone":
+            if use == "mobile" and not out.get("cell_phone"):
+                out["cell_phone"] = value
+            elif use in ("work", "office") and not out.get("office_phone"):
+                out["office_phone"] = value
+            elif not out.get("home_phone"):
+                out["home_phone"] = value
+    return out
+
+
+def _address_parts(value: Any, prefix: str = "") -> dict:
+    if isinstance(value, list):
+        value = next((a for a in value if isinstance(a, dict) and a.get("use") == "home"), value[0] if value else {})
+    if isinstance(value, str):
+        return {f"{prefix}address": value}
+    if not isinstance(value, dict):
+        return {}
+    lines = value.get("line") or []
+    address = " ".join(str(x) for x in lines) if isinstance(lines, list) else str(lines or "")
+    return {
+        f"{prefix}address": address,
+        f"{prefix}city": value.get("city", ""),
+        f"{prefix}state": value.get("state", ""),
+        f"{prefix}zip_code": value.get("postalCode") or value.get("zip_code") or value.get("zip") or "",
+    }
+
+
+def _coverage_payload(coverage: dict, prefix: str, subscriber: Optional[dict] = None) -> dict:
+    if not coverage:
+        return {}
+    payor = coverage.get("payor") or coverage.get("insurer") or []
+    payor0 = payor[0] if isinstance(payor, list) and payor else payor
+    company = _first_present(coverage, f"{prefix}_insurance_company", "insurance_company", "payer_name", "payor_name")
+    if not company and isinstance(payor0, dict):
+        company = payor0.get("display") or payor0.get("name")
+    payload = {
+        "insurance_company": company,
+        "insurance_id_number": _first_present(coverage, f"{prefix}_insurance_id", "insurance_id_number", "subscriberId", "subscriber_id", "member_id"),
+        "insurance_group_name": _first_present(coverage, f"{prefix}_group_name", "insurance_group_name", "group_name"),
+        "insurance_group_number": _first_present(coverage, f"{prefix}_group_number", "insurance_group_number", "group_number", "plan_id"),
+        "insurance_claim_office_number": _first_present(coverage, f"{prefix}_claim_office_number", "insurance_claim_office_number"),
+        "insurance_payer_id": _first_present(coverage, f"{prefix}_payer_id", "insurance_payer_id", "payer_id", "payor_id"),
+        "insurance_plan_name": _first_present(coverage, f"{prefix}_plan_name", "insurance_plan_name", "plan_name", "plan_short_name"),
+        "insurance_plan_type": _first_present(coverage, f"{prefix}_plan_type", "insurance_plan_type", "plan_type", "type"),
+    }
+
+    # Subscriber block. Default to "subscriber is the patient" unless the coverage says
+    # otherwise; when it is the patient, copy the patient's demographics.
+    relationship = str(_first_present(
+        coverage, "patient_relationship_to_subscriber", "subscriber_relationship", "relationship", default="",
+    )).strip()
+    is_self = _bool_value(_first_present(coverage, "is_subscriber_the_patient"))
+    if is_self is None:
+        is_self = relationship.lower() in ("", "self", "1", "18")
+    payload["is_subscriber_the_patient"] = is_self
+    if relationship:
+        payload["patient_relationship_to_subscriber"] = relationship
+
+    if is_self and subscriber:
+        payload.update({
+            "subscriber_first_name":      subscriber.get("first_name"),
+            "subscriber_middle_name":     subscriber.get("middle_name"),
+            "subscriber_last_name":       subscriber.get("last_name"),
+            "subscriber_suffix":          subscriber.get("suffix"),
+            "subscriber_date_of_birth":   subscriber.get("date_of_birth"),
+            "subscriber_social_security": subscriber.get("social_security_number"),
+            "subscriber_gender":          subscriber.get("gender"),
+            "subscriber_address":         subscriber.get("address"),
+            "subscriber_city":            subscriber.get("city"),
+            "subscriber_state":           subscriber.get("state"),
+            "subscriber_zip_code":        subscriber.get("zip_code"),
+            "subscriber_country":         subscriber.get("country") or "US",
+        })
+    else:
+        # Subscriber differs from the patient — take their demographics off the coverage.
+        sub_name = _human_name_parts(coverage.get("subscriber_name"))
+        payload.update({
+            "subscriber_first_name":      _first_present(coverage, "subscriber_first_name", default=sub_name.get("first_name")),
+            "subscriber_last_name":       _first_present(coverage, "subscriber_last_name", default=sub_name.get("last_name")),
+            "subscriber_date_of_birth":   _normalize_date(_first_present(coverage, "subscriber_date_of_birth", "subscriber_dob")),
+            "subscriber_gender":          _map_gender(_first_present(coverage, "subscriber_gender")),
+            "subscriber_address":         _first_present(coverage, "subscriber_address"),
+            "subscriber_city":            _first_present(coverage, "subscriber_city"),
+            "subscriber_state":           _first_present(coverage, "subscriber_state"),
+            "subscriber_zip_code":        _first_present(coverage, "subscriber_zip_code"),
+            "subscriber_country":         _first_present(coverage, "subscriber_country", default="US"),
+        })
+
+    return _clean_nested(payload)
+
+
 def _json_headers(token: str) -> dict:
     return {
         "Authorization": f"Bearer {token}",
@@ -1153,14 +1318,81 @@ def _multipart_headers(token: str) -> dict:
     }
 
 
+_RACE_MAP = {
+    "white": "white", "caucasian": "white",
+    "black": "black", "african american": "black", "black or african american": "black",
+    "asian": "asian",
+    "american indian": "indian", "alaska native": "indian", "native american": "indian",
+    "american indian or alaska native": "indian",
+    "native hawaiian": "hawaiian", "pacific islander": "hawaiian",
+    "native hawaiian or other pacific islander": "hawaiian",
+    "other": "other", "other race": "other",
+    "declined": "declined", "declined to specify": "declined",
+}
+
+# language name -> (ISO 639-2/B, ISO 639-1, description)
+_LANGUAGE_MAP = {
+    "english": ("eng", "en", "English"), "spanish": ("spa", "es", "Spanish"),
+    "french": ("fra", "fr", "French"), "german": ("deu", "de", "German"),
+    "italian": ("ita", "it", "Italian"), "portuguese": ("por", "pt", "Portuguese"),
+    "chinese": ("zho", "zh", "Chinese"), "hindi": ("hin", "hi", "Hindi"),
+    "arabic": ("ara", "ar", "Arabic"), "russian": ("rus", "ru", "Russian"),
+    "japanese": ("jpn", "ja", "Japanese"), "korean": ("kor", "ko", "Korean"),
+    "vietnamese": ("vie", "vi", "Vietnamese"),
+}
+
+
+def _map_race(value: Any) -> str:
+    """Map a race display/value to a DrChrono race code (white/black/asian/indian/hawaiian/other/declined)."""
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return ""
+    return _RACE_MAP.get(raw, "other")
+
+
+def _map_ethnicity(value: Any) -> str:
+    """Map an ethnicity display/value to a DrChrono code (hispanic/not_hispanic/declined)."""
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return ""
+    if "declin" in raw:
+        return "declined"
+    if ("hispanic" in raw or "latino" in raw) and not ("not" in raw or "non" in raw):
+        return "hispanic"
+    return "not_hispanic"
+
+
+def _language_fields(value: Any) -> tuple[str, str, str]:
+    """Return (ISO 639-2, ISO 639-1, description) for a language name or code."""
+    raw = str(value or "").strip()
+    if not raw:
+        return ("", "", "")
+    low = raw.lower()
+    if low in _LANGUAGE_MAP:
+        return _LANGUAGE_MAP[low]
+    for code3, code1, desc in _LANGUAGE_MAP.values():
+        if low in (code3, code1):
+            return (code3, code1, desc)
+    return (raw[:3].lower(), raw[:2].lower(), raw.title())
+
+
+def _pad_zip(value: Any) -> str:
+    """Restore a leading zero stripped by CSV/Excel (e.g. 2906 -> 02906)."""
+    s = str(value or "").strip()
+    return s.zfill(5) if s.isdigit() and len(s) < 5 else s
+
+
 def _map_patient(record: dict, doctor_id: Optional[int] = None) -> dict:
     name_raw = record.get("name")
 
     if isinstance(name_raw, list):
-        first, last = _extract_name(name_raw)
+        name_parts = _human_name_parts(name_raw)
+        first = name_parts.get("first_name") or ""
+        last = name_parts.get("last_name") or ""
     else:
         first = record.get("first_name") or record.get("given") or ""
         last = record.get("last_name") or record.get("family") or ""
+        name_parts = _human_name_parts(name_raw)
         if not first and not last:
             first, last = _extract_name(name_raw)
 
@@ -1178,6 +1410,7 @@ def _map_patient(record: dict, doctor_id: Optional[int] = None) -> dict:
     elif isinstance(addr_raw, str):
         address = addr_raw
 
+    phones = _contact_points(record.get("telecom"))
     phone = email = ""
     for t in record.get("telecom") or []:
         if isinstance(t, dict):
@@ -1188,9 +1421,16 @@ def _map_patient(record: dict, doctor_id: Optional[int] = None) -> dict:
             elif system == "email" and not email:
                 email = value
 
+    lang3, lang1, lang_desc = _language_fields(
+        _first_present(record, "preferred_language", "language", "communication_language")
+    )
+
     payload = {
         "first_name": first or "Unknown",
+        "middle_name": record.get("middle_name") or name_parts.get("middle_name"),
         "last_name": last or "Patient",
+        "nick_name": record.get("nick_name") or record.get("nickname") or name_parts.get("nick_name"),
+        "suffix": _first_present(record, "suffix", "name_suffix", default=name_parts.get("suffix")),
         "date_of_birth": _normalize_date(
             record.get("birthDate")
             or record.get("date_of_birth")
@@ -1203,27 +1443,371 @@ def _map_patient(record: dict, doctor_id: Optional[int] = None) -> dict:
             or record.get("gender_administrative")
             or record.get("administrative_gender")
         ) or "Other",
-        "email": email or record.get("email", ""),
-        "home_phone": phone or record.get("phone") or record.get("home_phone", ""),
-        "address": address or record.get("address") or record.get("street", ""),
-        "city": city or record.get("city", ""),
-        "state": state or record.get("state", ""),
-        "zip_code": zip_code or record.get("zip_code") or record.get("zip", ""),
+        "social_security_number": _first_present(record, "social_security_number", "ssn"),
+        "race": _map_race(_first_present(record, "race", "race_display", "race_code")),
+        "ethnicity": _map_ethnicity(_first_present(record, "ethnicity", "ethnicity_display", "ethnicity_code")),
+        "pronouns": _first_present(record, "pronouns"),
+        "preferred_language": lang3,
+        "preferred_language_description": _first_present(record, "preferred_language_description", "language_description", default=lang_desc),
+        "preferred_language_code": _first_present(record, "preferred_language_code", "language_code", default=lang1),
+        "gender_identity_description": _first_present(record, "gender_identity_description", "gender_identity"),
+        "gender_identity_code": _first_present(record, "gender_identity_code"),
+        "patient_payment_profile": _first_present(record, "patient_payment_profile", "payment_profile"),
+        "patient_status": _first_present(record, "patient_status", "status"),
+        "email": email or phones.get("email") or record.get("email", ""),
+        "home_phone": phone or phones.get("home_phone") or record.get("phone") or record.get("home_phone", ""),
+        "cell_phone": phones.get("cell_phone") or record.get("cell_phone") or record.get("mobile_phone"),
+        "office_phone": phones.get("office_phone") or record.get("office_phone") or record.get("work_phone"),
+        "address": address or _first_present(record, "address", "address_street", "street"),
+        "city": city or _first_present(record, "city", "address_city"),
+        "state": state or _first_present(record, "state", "address_state_code", "address_state"),
+        "zip_code": _pad_zip(zip_code or _first_present(record, "zip_code", "zip", "address_postal_code")),
+        "country": _first_present(record, "country", "address_country"),
+        "emergency_contact_name": _first_present(record, "emergency_contact_name"),
+        "emergency_contact_phone": _first_present(record, "emergency_contact_phone"),
+        "emergency_contact_relation": _first_present(record, "emergency_contact_relation", "emergency_contact_relationship"),
+        "employer": _first_present(record, "employer", "employer_name"),
+        "employer_address": _first_present(record, "employer_address"),
+        "employer_city": _first_present(record, "employer_city"),
+        "employer_state": _first_present(record, "employer_state"),
+        "employer_zip_code": _first_present(record, "employer_zip_code", "employer_zip"),
+        "timezone": _first_present(record, "timezone"),
+        "referring_source": _first_present(record, "referring_source"),
+        "copay": _first_present(record, "copay"),
+        "responsible_party_name": _first_present(record, "responsible_party_name"),
+        "responsible_party_relation": _first_present(record, "responsible_party_relation", "responsible_party_relationship"),
+        "responsible_party_phone": _first_present(record, "responsible_party_phone"),
+        "responsible_party_email": _first_present(record, "responsible_party_email"),
     }
+
+    disable_sms = _bool_value(_first_present(record, "disable_sms_messages", "disable_sms"))
+    if disable_sms is not None:
+        payload["disable_sms_messages"] = disable_sms
+
+    patient_flags = record.get("patient_flags")
+    if isinstance(patient_flags, list) and patient_flags:
+        payload["patient_flags"] = patient_flags
+
+    contact = _first_related(record, "contact", "contacts", "emergency_contact")
+    if contact:
+        contact_name = _human_name_parts(contact.get("name"))
+        if not payload.get("emergency_contact_name"):
+            payload["emergency_contact_name"] = " ".join(
+                x for x in (contact_name.get("first_name"), contact_name.get("middle_name"), contact_name.get("last_name")) if x
+            )
+        telecom = _contact_points(contact.get("telecom"))
+        if not payload.get("emergency_contact_phone"):
+            payload["emergency_contact_phone"] = telecom.get("home_phone") or telecom.get("cell_phone")
+        relation = contact.get("relationship")
+        if isinstance(relation, list):
+            relation = relation[0] if relation else {}
+        if not payload.get("emergency_contact_relation"):
+            payload["emergency_contact_relation"] = _value_to_text(relation)
+
+    responsible = _first_related(record, "responsible_party", "guarantor", "related_person", "RelatedPerson")
+    if responsible:
+        resp_name = _human_name_parts(responsible.get("name"))
+        if not payload.get("responsible_party_name"):
+            payload["responsible_party_name"] = " ".join(
+                x for x in (resp_name.get("first_name"), resp_name.get("middle_name"), resp_name.get("last_name")) if x
+            )
+        resp_telecom = _contact_points(responsible.get("telecom"))
+        if not payload.get("responsible_party_phone"):
+            payload["responsible_party_phone"] = resp_telecom.get("home_phone") or resp_telecom.get("cell_phone")
+        if not payload.get("responsible_party_email"):
+            payload["responsible_party_email"] = resp_telecom.get("email")
+        if not payload.get("responsible_party_relation"):
+            payload["responsible_party_relation"] = _value_to_text(_first_present(responsible, "relationship", "relation"))
+
+    employer = _first_related(record, "employer_resource", "employer_organization", "Organization")
+    if employer:
+        if not payload.get("employer"):
+            payload["employer"] = employer.get("name")
+        payload.update({k: v for k, v in _address_parts(employer.get("address"), "employer_").items() if v and not payload.get(k)})
+
+    referring = _first_related(record, "referring_doctor", "referring_provider", "practitioner", "Practitioner")
+    if referring:
+        ref_name = _human_name_parts(referring.get("name"))
+        ref_telecom = _contact_points(referring.get("telecom"))
+        ref_payload = {
+            "first_name": _first_present(referring, "first_name", default=ref_name.get("first_name")),
+            "middle_name": _first_present(referring, "middle_name", default=ref_name.get("middle_name")),
+            "last_name": _first_present(referring, "last_name", default=ref_name.get("last_name")),
+            "suffix": _first_present(referring, "suffix", default=ref_name.get("suffix")),
+            "npi": _first_present(referring, "npi"),
+            "provider_qualifier": _first_present(referring, "provider_qualifier"),
+            "provider_number": _first_present(referring, "provider_number"),
+            "address": _first_present(referring, "address"),
+            "email": _first_present(referring, "email", default=ref_telecom.get("email")),
+            "phone": _first_present(referring, "phone", default=ref_telecom.get("home_phone") or ref_telecom.get("cell_phone")),
+            "fax": _first_present(referring, "fax"),
+            "specialty": _value_to_text(_first_present(referring, "specialty", "qualification")),
+        }
+        if isinstance(ref_payload.get("address"), list) or isinstance(ref_payload.get("address"), dict):
+            ref_payload["address"] = _address_parts(ref_payload["address"]).get("address")
+        ref_payload = _clean_nested(ref_payload)
+        if ref_payload:
+            payload["referring_doctor"] = ref_payload
+
+    primary_coverage = _first_related(record, "primary_insurance", "primary_coverage")
+    secondary_coverage = _first_related(record, "secondary_insurance", "secondary_coverage")
+    coverages = record.get("coverages") or record.get("coverage") or record.get("Coverage") or []
+    coverages = coverages if isinstance(coverages, list) else [coverages]
+    for coverage in coverages:
+        if not isinstance(coverage, dict):
+            continue
+        rank = str(_first_present(coverage, "coverage_rank", "insurance_type", "rank", "order", default="")).lower()
+        if not primary_coverage and rank in ("", "primary", "1"):
+            primary_coverage = coverage
+        elif not secondary_coverage and rank in ("secondary", "2"):
+            secondary_coverage = coverage
+    # The subscriber defaults to the patient, so the insurance subscriber_* fields
+    # mirror the demographics built above.
+    subscriber = {
+        "first_name": payload.get("first_name"),
+        "middle_name": payload.get("middle_name"),
+        "last_name": payload.get("last_name"),
+        "suffix": payload.get("suffix"),
+        "date_of_birth": payload.get("date_of_birth"),
+        "social_security_number": payload.get("social_security_number"),
+        "gender": payload.get("gender"),
+        "address": payload.get("address"),
+        "city": payload.get("city"),
+        "state": payload.get("state"),
+        "zip_code": payload.get("zip_code"),
+        "country": _first_present(record, "address_country", "country", default="US"),
+    }
+    primary_payload = _coverage_payload(primary_coverage, "primary", subscriber)
+    secondary_payload = _coverage_payload(secondary_coverage, "secondary", subscriber)
+    if primary_payload:
+        payload["primary_insurance"] = primary_payload
+    if secondary_payload:
+        payload["secondary_insurance"] = secondary_payload
 
     if doctor_id:
         payload["doctor"] = int(doctor_id)
 
-    return _strip_empty(payload)
+    return _clean_nested(payload)
+
+
+def _reference_id(value: Any) -> str:
+    if isinstance(value, dict):
+        value = value.get("reference") or value.get("id") or value.get("value")
+    if isinstance(value, str) and "/" in value:
+        return value.rsplit("/", 1)[-1]
+    return str(value).strip() if value not in (None, "", [], {}) else ""
+
+
+def _valid_rxnorm(value: Any) -> str:
+    code = str(value or "").strip()
+    return code if re.match(r"^\d{1,12}$", code) else ""
+
+
+def _bool_value(value: Any) -> Optional[bool]:
+    if isinstance(value, bool):
+        return value
+    if value in (None, "", [], {}):
+        return None
+    raw = str(value).strip().lower()
+    if raw in ("true", "t", "yes", "y", "1"):
+        return True
+    if raw in ("false", "f", "no", "n", "0"):
+        return False
+    return None
+
+
+def _first_dosage(record: dict) -> dict:
+    dosage = record.get("dosageInstruction") or record.get("dosage") or []
+    if isinstance(dosage, list) and dosage and isinstance(dosage[0], dict):
+        return dosage[0]
+    if isinstance(dosage, dict):
+        return dosage
+    return {}
+
+
+def _dose_quantity(dosage: dict) -> tuple[str, str]:
+    dose_and_rate = dosage.get("doseAndRate") or []
+    if isinstance(dose_and_rate, list) and dose_and_rate:
+        dose = dose_and_rate[0].get("doseQuantity") if isinstance(dose_and_rate[0], dict) else None
+        if isinstance(dose, dict):
+            return (str(dose.get("value") or "").strip(), str(dose.get("unit") or dose.get("code") or "").strip())
+    dose_quantity = dosage.get("doseQuantity")
+    if isinstance(dose_quantity, dict):
+        return (
+            str(dose_quantity.get("value") or "").strip(),
+            str(dose_quantity.get("unit") or dose_quantity.get("code") or "").strip(),
+        )
+    return ("", "")
+
+
+def _dosage_frequency(dosage: dict) -> str:
+    if dosage.get("text"):
+        return str(dosage["text"]).strip()
+    timing = dosage.get("timing") or {}
+    repeat = timing.get("repeat") if isinstance(timing, dict) else {}
+    if isinstance(repeat, dict):
+        frequency = repeat.get("frequency")
+        period = repeat.get("period")
+        period_unit = repeat.get("periodUnit")
+        if frequency and period and period_unit:
+            return f"{frequency} per {period} {period_unit}".strip()
+    code = timing.get("code") if isinstance(timing, dict) else {}
+    return _codeable_text(code)
+
+
+def _medication_name(record: dict) -> str:
+    med = record.get("medicationCodeableConcept") or record.get("medication")
+    if isinstance(med, dict):
+        concept = med.get("concept") if isinstance(med.get("concept"), dict) else med
+        text = _codeable_text(concept)
+        if text:
+            return text
+    if isinstance(med, str):
+        return med.strip()
+    nested_med = record.get("medication_resource") or record.get("Medication")
+    if isinstance(nested_med, dict):
+        text = _codeable_text(nested_med.get("code"))
+        if text:
+            return text
+    return str(_first_present(record, "name", "name_full", "display", "medication_name", "drug_name", "description")).strip()
+
+
+def _medication_rxnorm(record: dict) -> str:
+    for value in (record.get("rxnorm"), record.get("rxnorm_code"), record.get("code")):
+        code = _valid_rxnorm(value)
+        if code:
+            return code
+    for med in (record.get("medicationCodeableConcept"), record.get("medication"), record.get("medication_resource"), record.get("Medication")):
+        concept = med.get("concept") if isinstance(med, dict) and isinstance(med.get("concept"), dict) else med
+        if not isinstance(concept, dict):
+            continue
+        for coding in concept.get("coding") or []:
+            if not isinstance(coding, dict):
+                continue
+            system = str(coding.get("system") or "").lower()
+            if "rxnorm" in system:
+                code = _valid_rxnorm(coding.get("code"))
+                if code:
+                    return code
+    return ""
+
+
+def _medication_ndc(record: dict) -> str:
+    """Extract an NDC (National Drug Code) from flat fields or a FHIR coding.
+
+    NDC in FHIR is carried on medicationCodeableConcept.coding with
+    system 'http://hl7.org/fhir/sid/ndc'."""
+    for value in (record.get("ndc"), record.get("ndc_code"), record.get("national_drug_code")):
+        code = str(value or "").strip()
+        if code:
+            return code
+    for med in (record.get("medicationCodeableConcept"), record.get("medication"), record.get("medication_resource"), record.get("Medication")):
+        concept = med.get("concept") if isinstance(med, dict) and isinstance(med.get("concept"), dict) else med
+        if not isinstance(concept, dict):
+            continue
+        for coding in concept.get("coding") or []:
+            if not isinstance(coding, dict):
+                continue
+            system = str(coding.get("system") or "").lower()
+            if "ndc" in system or "/sid/ndc" in system:
+                code = str(coding.get("code") or "").strip()
+                if code:
+                    return code
+    return ""
+
+
+def _medication_appointment(record: dict) -> str:
+    direct = _first_present(record, "appointment", "appointment_id", "drchrono_appointment_id")
+    direct_id = _reference_id(direct)
+    if direct_id:
+        return direct_id
+    for key in ("source_encounter_id", "encounter_id", "encounter_fhir_id", "encounter_csn", "source_appointment_id"):
+        source_id = str(record.get(key) or "").strip()
+        if source_id and source_id in _APPT_ID_MAP:
+            return str(_APPT_ID_MAP[source_id])
+    encounter = record.get("encounter") or record.get("context")
+    encounter_id = _reference_id(encounter)
+    if encounter_id and encounter_id in _APPT_ID_MAP:
+        return str(_APPT_ID_MAP[encounter_id])
+    return ""
+
+
+def _med_value(record: dict, *keys: str) -> str:
+    value = _first_present(record, *keys)
+    if isinstance(value, list) and value:
+        first = value[0]
+        if isinstance(first, dict):
+            value = first.get("text") or _codeable_text(first)
+        else:
+            value = first
+    elif isinstance(value, dict):
+        value = value.get("text") or _codeable_text(value)
+    return str(value).strip() if value not in (None, "", [], {}) else ""
+
+
+def _med_order_status(value: Any) -> str:
+    raw = str(value or "").strip().lower()
+    mapping = {
+        "order": "Ordered",
+        "ordered": "Ordered",
+        "active": "Ordered",
+        "draft": "Draft",
+        "on-hold": "On Hold",
+        "stopped": "Stopped",
+        "completed": "Completed",
+        "cancelled": "Cancelled",
+        "canceled": "Cancelled",
+    }
+    return mapping.get(raw, str(value).strip() if value not in (None, "") else "")
+
+
+def _med_order_type(value: Any) -> str:
+    raw = str(value or "").strip().lower()
+    mapping = {
+        "outpatient": "Prescription",
+        "community": "Prescription",
+        "prescription": "Prescription",
+        "order": "Prescription",
+        "medicationrequest": "Prescription",
+    }
+    return mapping.get(raw, str(value).strip() if value not in (None, "") else "")
+
+
+def _number_value(value: Any) -> Any:
+    if value in (None, "", [], {}):
+        return ""
+    match = re.search(r"\d+(?:\.\d+)?", str(value))
+    if not match:
+        return ""
+    number = float(match.group(0))
+    return int(number) if number.is_integer() else number
+
+
+def _med_sentence(value: str) -> str:
+    return str(value or "").strip().rstrip(". ")
+
+
+def _compose_med_notes(record: dict, indication: str, signature_note: str, pharmacy_note: str) -> str:
+    explicit = _med_value(record, "notes", "note")
+    if explicit:
+        return explicit
+    patient_instruction = _med_value(record, "dosagePatientInstruction", "dosagepatientInstruction", "patient_instructions", "patient_instruction", "patientInstruction")
+    additional = _med_value(record, "dosageInstructionText", "additional_instructions", "additional_instruction", "additionalInstruction")
+    parts = []
+    if indication:
+        parts.append(f"Reason: {_med_sentence(indication)}.")
+    if patient_instruction or signature_note:
+        parts.append(f"Patient Instructions: {_med_sentence(patient_instruction or signature_note)}.")
+    if additional or pharmacy_note:
+        parts.append(f"Additional Instructions: {_med_sentence(additional or pharmacy_note)}.")
+    return " ".join(parts)
 
 
 def _map_medication(record: dict, doctor_id: Optional[int], patient_id: Optional[int]) -> dict:
+    dosage = _first_dosage(record)
+    dose_qty, dose_units = _dose_quantity(dosage)
     med_name = (
-        record.get("name")
-        or record.get("name_full")
-        or record.get("display")
-        or _codeable_text(record.get("medicationCodeableConcept"))
-        or _codeable_text(record.get("medication"))
+        _medication_name(record)
         or ""
     )
 
@@ -1234,81 +1818,226 @@ def _map_medication(record: dict, doctor_id: Optional[int], patient_id: Optional
         "status": _active_status(record.get("status"), default="active"),
     }
 
-    rxnorm = (
-        record.get("rxnorm")
-        or record.get("rxnorm_code")
-        or _codeable_code(record.get("medicationCodeableConcept"))
-    )
+    appointment = _medication_appointment(record)
+    if appointment:
+        try:
+            payload["appointment"] = int(appointment)
+        except (TypeError, ValueError):
+            payload["appointment"] = appointment
+
+    rxnorm = _medication_rxnorm(record)
     if rxnorm:
-        payload["rxnorm"] = str(rxnorm)
+        payload["rxnorm"] = rxnorm
 
-    dosage = record.get("dosageInstruction") or []
-    if isinstance(dosage, list) and dosage:
-        d0 = dosage[0]
-        if isinstance(d0, dict) and d0.get("text"):
-            payload["frequency"] = d0["text"]
+    ndc = _medication_ndc(record)
+    if ndc:
+        payload["ndc"] = ndc
 
-    if record.get("dosage_quantity"):
-        payload["dosage_quantity"] = str(record["dosage_quantity"])
-    if record.get("dosage_unit"):
-        payload["dosage_unit"] = record["dosage_unit"]
-    if record.get("route"):
-        payload["route"] = record["route"]
-    if record.get("frequency") or record.get("frequencyText"):
-        payload["frequency"] = record.get("frequencyText") or record.get("frequency")
-    if record.get("reason") or record.get("indication"):
-        payload["indication"] = record.get("reason") or record.get("indication")
+    date_prescribed = _first_present(record, "date_prescribed", "start_dt", "authoredOn", "authored_on", "ordered_at", "date")
+    if date_prescribed:
+        payload["date_prescribed"] = _normalize_date(date_prescribed)
 
-    start_date = record.get("start_dt") or record.get("start_date") or record.get("authoredOn") or record.get("date")
+    start_date = _first_present(record, "date_started_taking", "start_dt", "start_date", "effectiveDateTime")
+    effective_period = record.get("effectivePeriod") or {}
+    if not start_date and isinstance(effective_period, dict):
+        start_date = effective_period.get("start")
     if start_date:
-        payload["start_date"] = _normalize_date(start_date)
+        payload["date_started_taking"] = _normalize_date(start_date)
+
+    for target, keys in (
+        ("order_status", ("order_status", "filled_status", "intent")),
+        ("order_type", ("order_type", "category")),
+        ("route", ("route",)),
+        ("frequency", ("frequencyText", "frequency_name_full", "sig")),
+        ("indication", ("indication", "reason", "reason_text", "reason_name_full", "reason_full_name", "reasonCode")),
+        ("number_refills", ("number_refills", "frequency", "refills", "numberOfRepeatsAllowed")),
+        ("dispense_quantity", ("dispense_quantity", "quantity")),
+        ("notes", ("notes", "note")),
+        ("signature_note", ("signature_note", "signature_instructions", "sig_note")),
+        ("pharmacy_note", ("pharmacy_note", "dosageInstructionText", "pharmacy_instructions", "dispense_note", "additional_instructions", "additional_instruction", "additionalInstruction")),
+    ):
+        value = _first_present(record, *keys)
+        if isinstance(value, list) and value and isinstance(value[0], dict):
+            value = value[0].get("text") or _codeable_text(value[0])
+        elif isinstance(value, dict):
+            value = value.get("text") or _codeable_text(value)
+        if value not in (None, "", [], {}):
+            payload[target] = str(value).strip()
+
+    route = _first_present(dosage, "route")
+    if route:
+        payload["route"] = _codeable_text(route) if isinstance(route, dict) else str(route).strip()
+
+    frequency = _dosage_frequency(dosage)
+    if frequency:
+        payload["frequency"] = frequency
+
+    if not payload.get("dosage_quantity"):
+        payload["dosage_quantity"] = _first_present(record, "dosage_quantity", "dose_quantity", default=dose_qty)
+    if not payload.get("dosage_units"):
+        payload["dosage_units"] = _first_present(record, "dosage_units", "dosage_unit", "dose_unit", "unit", default=dose_units)
+
+    dispense = record.get("dispenseRequest") or {}
+    if isinstance(dispense, dict):
+        if not payload.get("number_refills") and dispense.get("numberOfRepeatsAllowed") not in (None, ""):
+            payload["number_refills"] = _number_value(dispense["numberOfRepeatsAllowed"])
+        quantity = dispense.get("quantity")
+        if not payload.get("dispense_quantity"):
+            if isinstance(quantity, dict):
+                payload["dispense_quantity"] = _number_value(quantity.get("value"))
+            elif quantity not in (None, ""):
+                payload["dispense_quantity"] = _number_value(quantity)
+
+    for field, keys in (("prn", ("prn", "as_needed", "asNeededBoolean")), ("daw", ("daw", "dispense_as_written"))):
+        value = _first_present(record, *keys)
+        if value in (None, "", [], {}) and field == "prn":
+            value = dosage.get("asNeededBoolean")
+        bool_value = _bool_value(value)
+        if bool_value is not None:
+            payload[field] = bool_value
+
+    substitution = record.get("substitution") or {}
+    if isinstance(substitution, dict) and "daw" not in payload:
+        allowed = _bool_value(substitution.get("allowedBoolean"))
+        if allowed is not None:
+            payload["daw"] = not allowed
+
+    if payload.get("order_status"):
+        payload["order_status"] = _med_order_status(payload["order_status"])
+    else:
+        payload["order_status"] = "Ordered"
+    if payload.get("order_type"):
+        payload["order_type"] = _med_order_type(payload["order_type"])
+    else:
+        payload["order_type"] = "Prescription"
+
+    for numeric_field in ("number_refills", "dispense_quantity"):
+        if payload.get(numeric_field) not in (None, "", [], {}):
+            normalized = _number_value(payload[numeric_field])
+            if normalized != "":
+                payload[numeric_field] = normalized
+
+    if "prn" not in payload:
+        payload["prn"] = False
+    if "daw" not in payload:
+        payload["daw"] = False
+
+    signature_note = str(payload.get("signature_note") or "").strip()
+    pharmacy_note = str(payload.get("pharmacy_note") or "").strip()
+    indication = str(payload.get("indication") or "").strip()
+    composed_notes = _compose_med_notes(record, indication, signature_note, pharmacy_note)
+    if composed_notes:
+        payload["notes"] = composed_notes
 
     return _strip_empty(payload)
+
+
+def _problem_codes(record: dict) -> tuple[str, Any, str]:
+    """Return (icd_code, icd_version, snomed_ct_code) from flat or coded problem fields.
+
+    The source carries the code in `code` and the system in `code_vocab`
+    (e.g. 'ICD-10-CM' -> icd_code + icd_version 10; 'SNOMED-CT' -> snomed_ct_code)."""
+    raw_code = record.get("code")
+    code_str = raw_code if isinstance(raw_code, str) else _codeable_code(raw_code)
+    code_str = str(code_str or "").strip()
+    vocab = str(record.get("code_vocab") or record.get("code_system") or "").upper()
+
+    icd_code = str(_first_present(record, "icd_code", "code_value", "icd10_code", "icd") or "").strip()
+    snomed = str(_first_present(record, "snomed_ct_code", "snomed_code", "snomed") or "").strip()
+
+    if code_str:
+        if "SNOMED" in vocab:
+            snomed = snomed or code_str
+        elif "ICD" in vocab or not vocab:
+            icd_code = icd_code or code_str
+
+    icd_version: Any = ""
+    if "ICD-10" in vocab or "ICD10" in vocab:
+        icd_version = 10
+    elif "ICD-9" in vocab or "ICD9" in vocab:
+        icd_version = 9
+    elif icd_code:
+        explicit_ver = _first_present(record, "icd_version", "icd_code_version")
+        m = re.search(r"\d+", str(explicit_ver)) if explicit_ver else None
+        if m:
+            icd_version = int(m.group())
+
+    return icd_code, icd_version, snomed
 
 
 def _map_condition(record: dict, doctor_id: Optional[int], patient_id: Optional[int]) -> dict:
     """
     Map to DrChrono /problems.
-    Verified field names (from live DrChrono 400 responses):
+    Verified field names (from live DrChrono payloads):
       Required: patient, doctor, description
-      Optional: icd_code, date_onset, status ('active' / 'resolved' — lowercase only)
+      Optional: name, category, icd_code, icd_version, snomed_ct_code, date_onset,
+                date_diagnosis, status ('active' / 'resolved'), verification_status,
+                problem_type, notes, appointment
     """
-    description = (
-        record.get("description")
-        or record.get("name")
+    name = (
+        record.get("name")
         or record.get("name_full")
         or _codeable_text(record.get("code"))
         or record.get("condition_name")
         or ""
     )
+    description = (
+        record.get("description")
+        or record.get("name_rx")
+        or record.get("name_short")
+        or name
+    )
 
     payload = {
         "patient": int(patient_id) if patient_id else None,
         "doctor": int(doctor_id) if doctor_id else None,
+        "name": name,
         "description": description,
         "status": _condition_status(record),
+        "category": _first_present(record, "category", "problem_category", default="problem-list-item"),
     }
 
-    icd_code = (
-        record.get("icd_code")
-        or record.get("code_value")
-        or record.get("icd")
-        or (record.get("code") if isinstance(record.get("code"), str) else None)
-        or _codeable_code(record.get("code"))
-    )
+    icd_code, icd_version, snomed = _problem_codes(record)
     if icd_code:
-        payload["icd_code"] = str(icd_code).strip()
+        payload["icd_code"] = icd_code
+    if icd_version != "":
+        payload["icd_version"] = icd_version
+    if snomed:
+        payload["snomed_ct_code"] = snomed
 
-    onset = (
-        record.get("date_onset")
-        or record.get("onsetDateTime")
-        or record.get("start_dt")
-        or record.get("onset_date")
-        or record.get("diagnosis_date")
-        or record.get("date_diagnosis")
-    )
+    onset = _first_present(record, "date_onset", "onsetDateTime", "start_dt", "onset_date")
     if onset:
         payload["date_onset"] = _normalize_date(onset)
+
+    diagnosis = _first_present(record, "date_diagnosis", "diagnosis_date", "recorded_dt", "recordedDate")
+    if diagnosis:
+        payload["date_diagnosis"] = _normalize_date(diagnosis)
+
+    # NOTE: allergies use 'verification_status' (underscore); we use the same here.
+    vs_raw = _first_present(record, "verification_status", "verificationStatus", default="confirmed")
+    if isinstance(vs_raw, dict):
+        vs_raw = _codeable_text(vs_raw) or "confirmed"
+    payload["verification_status"] = str(vs_raw).strip().lower() or "confirmed"
+
+    problem_type = _first_present(record, "problem_type", "problemType")
+    if problem_type:
+        payload["problem_type"] = str(problem_type).strip()
+
+    # Notes: prefer an explicit note; otherwise surface the full condition name
+    # (name_full carries detail the shorter 'description' drops, e.g. "Concentric ...").
+    notes = _first_present(record, "notes", "note", "clinical_note", "plan", "instructions")
+    if not notes:
+        notes = _first_present(record, "name_full", "name_rx", "name_short")
+    if notes:
+        payload["notes"] = str(notes).strip()
+
+    # Tag to the DrChrono appointment created earlier in this run (via encounter_id).
+    appointment = _medication_appointment(record)
+    if appointment:
+        try:
+            payload["appointment"] = int(appointment)
+        except (TypeError, ValueError):
+            payload["appointment"] = appointment
 
     return _strip_empty(payload)
 
@@ -1327,6 +2056,157 @@ def _normalize_datetime(val: Any) -> str:
         return s[:10] + "T09:00:00"
     return s
 
+
+# DrChrono appointment custom-field id -> source columns (from appointment.csv).
+# Ids verified against the live DrChrono custom-field form (Reason Short Name,
+# Description, Comment, Service Type, Specialty, Appointment Type, Practitioner Name,
+# Reason Code, Reason Code Vocabulary).
+_APPOINTMENT_CUSTOM_FIELD_MAP = (
+    (11463, ("reason_name_short", "reason_short_name", "reason_short")),
+    (11465, ("description",)),
+    (11466, ("comment", "clinical_notes", "clinical_note", "appointment_notes", "notes")),
+    (11472, ("service_type", "service_category", "class_display", "type")),
+    (11473, ("specialty", "provider_specialty", "practitioner_specialty")),
+    (11474, ("appointment_type", "encounter_type", "visit_type", "care_setting", "setting", "class_display", "class")),
+    (11475, ("practitioner_name", "provider_name", "practitioner_display", "doctor_name", "performer_name", "name")),
+    (11488, ("reason_code", "reason_code_value")),
+    (11489, ("reason_code_vocab", "reason_code_vocabulary", "reason_code_system")),
+)
+
+
+def _extract_icd10_codes(record: dict) -> list[str]:
+    """Collect likely ICD-10 codes from flat CSV fields or FHIR-style codings."""
+    raw_values = [
+        _first_present(record, "primary_diagnosis_code", "diagnosis_code", "icd10_code", "icd_code", "icd"),
+        record.get("icd10_codes"),
+        record.get("diagnosis_codes"),
+        record.get("condition_codes"),
+    ]
+    code_obj = record.get("code")
+    if isinstance(code_obj, dict):
+        for coding in code_obj.get("coding") or []:
+            if not isinstance(coding, dict):
+                continue
+            system = str(coding.get("system") or coding.get("code_vocab") or "").lower()
+            code = coding.get("code")
+            if code and ("icd-10" in system or "icd10" in system):
+                raw_values.append(code)
+    for related_key in ("condition", "conditions", "diagnosis", "diagnoses"):
+        related = record.get(related_key)
+        items = related if isinstance(related, list) else [related]
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            raw_values.extend([
+                _first_present(item, "primary_diagnosis_code", "diagnosis_code", "icd10_code", "icd_code", "icd"),
+                item.get("icd10_codes"),
+            ])
+            item_code = item.get("code")
+            if isinstance(item_code, dict):
+                for coding in item_code.get("coding") or []:
+                    if not isinstance(coding, dict):
+                        continue
+                    system = str(coding.get("system") or "").lower()
+                    code = coding.get("code")
+                    if code and ("icd-10" in system or "icd10" in system):
+                        raw_values.append(code)
+
+    codes: list[str] = []
+    for raw in raw_values:
+        values = raw if isinstance(raw, list) else str(raw or "").replace("|", ",").split(",")
+        for value in values:
+            code = str(value).strip()
+            if code and re.match(r"^[A-TV-Z][0-9][0-9A-Z](?:\.?[0-9A-Z]{0,4})$", code, re.I):
+                normalized = code.upper()
+                if normalized not in codes:
+                    codes.append(normalized)
+    return codes
+
+
+def _value_to_text(value: Any) -> str:
+    if value in (None, "", [], {}):
+        return ""
+    if isinstance(value, dict):
+        text = _codeable_text(value)
+        if text:
+            return text
+        if value.get("display"):
+            return str(value["display"]).strip()
+        if value.get("given") or value.get("family"):
+            given = value.get("given") or []
+            given_text = " ".join(str(x) for x in given) if isinstance(given, list) else str(given or "")
+            return f"{given_text} {value.get('family', '')}".strip()
+        name = value.get("name")
+        if isinstance(name, list) and name:
+            first = name[0]
+            if isinstance(first, dict):
+                given = first.get("given") or []
+                given_text = " ".join(str(x) for x in given) if isinstance(given, list) else str(given or "")
+                return f"{given_text} {first.get('family', '')}".strip()
+        if value.get("text"):
+            return str(value["text"]).strip()
+    if isinstance(value, list):
+        for item in value:
+            text = _value_to_text(item)
+            if text:
+                return text
+        return ""
+    return str(value).strip()
+
+
+def _custom_field_value(record: dict, keys: tuple[str, ...]) -> Any:
+    value = _first_present(record, *keys)
+    if value:
+        return _value_to_text(value)
+    for related_key in ("appointment", "encounter", "condition", "conditions", "practitioner", "provider"):
+        related = record.get(related_key)
+        items = related if isinstance(related, list) else [related]
+        for item in items:
+            if isinstance(item, dict):
+                value = _first_present(item, *keys)
+                text = _value_to_text(value)
+                if text:
+                    return text
+    return ""
+
+
+def _appointment_custom_fields(record: dict) -> list[dict[str, Any]]:
+    fields = []
+    for field_type, keys in _APPOINTMENT_CUSTOM_FIELD_MAP:
+        value = _custom_field_value(record, keys)
+        if value not in (None, "", [], {}):
+            fields.append({"field_type": field_type, "field_value": str(value).strip()})
+    return fields
+
+
+def _duration_minutes(value: Any, default: int = 30) -> int:
+    if value in (None, "", [], {}):
+        return default
+    if isinstance(value, (int, float)):
+        return max(int(value), 1)
+    match = re.search(r"\d+(?:\.\d+)?", str(value))
+    if not match:
+        return default
+    try:
+        return max(int(float(match.group(0))), 1)
+    except (TypeError, ValueError):
+        return default
+
+
+def _duration_from_period(record: dict, default: int = 30) -> int:
+    start = _first_present(record, "start_dt", "start", "scheduled_time", "date")
+    end = _first_present(record, "end_dt", "end")
+    if not start or not end:
+        return default
+    try:
+        from datetime import datetime
+        s = str(start).strip().rstrip("Z")[:19]
+        e = str(end).strip().rstrip("Z")[:19]
+        delta = datetime.fromisoformat(e) - datetime.fromisoformat(s)
+        minutes = int(delta.total_seconds() // 60)
+        return max(minutes, 1) if minutes > 0 else default
+    except Exception:
+        return default
 
 def _map_encounter(record: dict, doctor_id: Optional[int], patient_id: Optional[int]) -> dict:
     """
@@ -1357,14 +2237,11 @@ def _map_encounter(record: dict, doctor_id: Optional[int], patient_id: Optional[
     )
     scheduled_time = _normalize_datetime(raw_time)
 
-    duration = 30
-    try:
-        duration = int(_first_present(record, "duration", "minutesDuration", "length_minutes", default=30) or 30)
-    except (ValueError, TypeError):
-        pass
+    duration_value = _first_present(record, "duration_in_mins", "duration", "duration_minutes", "minutesDuration", "length_minutes")
+    duration = _duration_minutes(duration_value, default=_duration_from_period(record))
 
     # DrChrono caps "reason" at 100 chars — anything longer 400s. Truncate safely.
-    reason = _first_present(record, "reason", "encounter_type", "description", "chief_complaint")
+    reason = _first_present(record, "reason_name_full", "reason_full_name", "reason", "chief_complaint", "service_type", "appointment_type", "encounter_type", "class_display", "description")
     if reason and len(str(reason)) > 100:
         reason = str(reason)[:97] + "..."
 
@@ -1377,6 +2254,22 @@ def _map_encounter(record: dict, doctor_id: Optional[int], patient_id: Optional[
         "reason": reason,
         "allow_overlapping": True,
     }
+
+    notes = _first_present(record, "notes", "appointment_notes", "clinical_notes", "comment")
+    if notes:
+        payload["notes"] = str(notes)
+
+    payment_profile = _first_present(record, "payment_profile")
+    if payment_profile:
+        payload["payment_profile"] = str(payment_profile)
+
+    icd10_codes = _extract_icd10_codes(record)
+    if icd10_codes:
+        payload["icd10_codes"] = icd10_codes
+
+    custom_fields = _appointment_custom_fields(record)
+    if custom_fields:
+        payload["custom_fields"] = custom_fields
 
     # Only set office if explicitly provided as an integer office ID (not doctor_id).
     # If absent, _live_push_record fills the doctor's real office from /api/offices
@@ -1393,6 +2286,82 @@ def _map_encounter(record: dict, doctor_id: Optional[int], patient_id: Optional[
         payload["exam_room"] = 1
 
     return _strip_empty(payload)
+
+
+def _allergy_criticality(value: Any) -> str:
+    """Map a FHIR allergy criticality to its display ('low' -> 'Low Risk')."""
+    raw = _value_to_text(value).strip()
+    if not raw or raw.lower() in ("uncoded", "unknown"):
+        return ""
+    return {
+        "low": "Low Risk", "high": "High Risk",
+        "unable-to-assess": "Unable to Assess", "unable to assess": "Unable to Assess",
+    }.get(raw.lower(), raw)
+
+
+def _code_system_display(value: Any) -> str:
+    """Map a code-system token to a readable label ('SNOMED-CT' -> 'SNOMED CT')."""
+    raw = str(value or "").strip()
+    if not raw or raw.lower() == "uncoded":
+        return ""
+    key = re.sub(r"[\s\-_]", "", raw).upper()
+    return {
+        "SNOMEDCT": "SNOMED CT", "SNOMED": "SNOMED CT", "RXNORM": "RxNorm",
+        "ICD10CM": "ICD-10-CM", "ICD10": "ICD-10", "ICD9CM": "ICD-9-CM", "LOINC": "LOINC",
+    }.get(key, raw)
+
+
+def _compose_allergy_notes(record: dict, description: str, reaction: Any) -> str:
+    """Build the structured allergy note block DrChrono accepts:
+
+        Allergy Note: <narrative>
+        Severity: <severity>
+        Criticality: <criticality>
+        Category: <category>
+        Type: <type>
+        Code: <code>
+        Code System: <code system>
+        Source: RhythmX AI Import
+    """
+    lines: list[str] = []
+
+    explicit = str(_first_present(record, "allergy_note", "notes", "note") or "").strip()
+    if explicit:
+        narrative = explicit
+    elif description and reaction:
+        narrative = (f"Patient reports allergic reaction to {description} "
+                     f"resulting in {str(reaction).strip().lower()}.")
+    else:
+        narrative = ""
+    if narrative:
+        lines.append(f"Allergy Note: {narrative}")
+
+    severity = _value_to_text(_first_present(record, "reaction_severity", "severity")).strip()
+    if severity and severity.lower() not in ("uncoded", "unknown"):
+        lines.append(f"Severity: {severity}")
+
+    criticality = _allergy_criticality(_first_present(record, "allergy_criticality", "criticality"))
+    if criticality:
+        lines.append(f"Criticality: {criticality}")
+
+    category = _value_to_text(_first_present(record, "category")).strip()
+    if category and category.lower() != "uncoded":
+        lines.append(f"Category: {category}")
+
+    atype = _value_to_text(_first_present(record, "type", "allergy_type")).strip()
+    if atype and atype.lower() != "uncoded":
+        lines.append(f"Type: {atype}")
+
+    raw_code = record.get("code")
+    code = _codeable_code(raw_code) if isinstance(raw_code, dict) else str(raw_code or "").strip()
+    if code and code.lower() != "uncoded":
+        lines.append(f"Code: {code}")
+        code_system = _code_system_display(_first_present(record, "code_vocab", "code_system"))
+        if code_system:
+            lines.append(f"Code System: {code_system}")
+
+    lines.append("Source: RhythmX AI Import")
+    return "\n".join(lines)
 
 
 def _map_allergy(record: dict, doctor_id: Optional[int], patient_id: Optional[int]) -> dict:
@@ -1419,33 +2388,37 @@ def _map_allergy(record: dict, doctor_id: Optional[int], patient_id: Optional[in
     if reaction:
         payload["reaction"] = str(reaction)
 
-    notes = _first_present(record, "notes", "note", "allergy_note")
+    notes = _compose_allergy_notes(record, name, reaction)
     if notes:
-        payload["notes"] = str(notes)
+        payload["notes"] = notes
 
     snomed_reaction = record.get("snomed_reaction")
     if snomed_reaction:
         payload["snomed_reaction"] = str(snomed_reaction)
 
+    # rxnorm comes from an explicit rxnorm field, or an RxNorm-coded `code`. The allergen's
+    # SNOMED/other code is surfaced in the notes (Code / Code System), not snomed_code.
     raw_code = record.get("code")
     if isinstance(raw_code, dict):
         raw_code = _codeable_code(raw_code)
     raw_code = str(raw_code or "").strip()
     code_vocab = str(record.get("code_vocab") or "").upper()
-    if raw_code:
-        if "SNOMED" in code_vocab:
-            payload["snomed_code"] = raw_code
-        elif "RXNORM" in code_vocab or code_vocab.startswith("RX"):
-            payload["rxnorm"] = raw_code
-
-    rxnorm = record.get("rxnorm")
+    rxnorm = record.get("rxnorm") or (raw_code if ("RXNORM" in code_vocab or code_vocab.startswith("RX")) else "")
     if rxnorm:
         payload["rxnorm"] = str(rxnorm)
 
-    vs_raw = _first_present(record, "verification_status", "verificationStatus", default="confirmed")
+    # Only an explicitly-provided snomed_code is sent (target keeps it empty otherwise).
+    snomed_code = record.get("snomed_code")
+    if snomed_code:
+        payload["snomed_code"] = str(snomed_code)
+
+    # verification_status: send only what the source provides — don't force 'confirmed'.
+    vs_raw = _first_present(record, "verification_status", "verificationStatus")
     if isinstance(vs_raw, dict):
-        vs_raw = _codeable_text(vs_raw) or "confirmed"
-    payload["verification_status"] = str(vs_raw).strip().lower() or "confirmed"
+        vs_raw = _codeable_text(vs_raw)
+    vs = str(vs_raw or "").strip().lower()
+    if vs:
+        payload["verification_status"] = vs
 
     return _strip_empty(payload)
 
@@ -1516,9 +2489,12 @@ def _map_service_request(record: dict, doctor_id: Optional[int], patient_id: Opt
     payload = {
         "patient": int(patient_id) if patient_id else None,
         "doctor": int(doctor_id) if doctor_id else None,
-        "description": _first_present(record, "description", "service_name", "name_full", default=_codeable_text(record.get("code"))),
+        "description": _first_present(record, "description", "service_name", "name_full", "name_short", default=_codeable_text(record.get("code"))),
         "status": _first_present(record, "status", default="active"),
-        "order_date": _normalize_date(_first_present(record, "order_date", "order_dt", "authored_dt", "authoredOn")),
+        # servicerequests.csv uses occurrence_dt for the order date.
+        "order_date": _normalize_date(_first_present(record, "order_date", "order_dt", "occurrence_dt", "occurrenceDateTime", "authored_dt", "authoredOn", "recorded_dt")),
+        "priority": _first_present(record, "priority"),
+        "notes": _first_present(record, "notes", "note", "comment"),
     }
 
     return _strip_empty(payload)
@@ -1527,10 +2503,12 @@ def _map_service_request(record: dict, doctor_id: Optional[int], patient_id: Opt
 def _map_coverage(record: dict, doctor_id: Optional[int], patient_id: Optional[int]) -> dict:
     payload = {
         "patient": int(patient_id) if patient_id else None,
+        # coverages.csv uses payor_name / plan_name / subscriber_id / plan_id.
         "insurance_company": _first_present(record, "insurance_company", "payer_name", "payor_name"),
-        "insurance_plan_name": _first_present(record, "insurance_plan_name", "plan_name"),
+        "insurance_plan_name": _first_present(record, "insurance_plan_name", "plan_name", "plan_short_name"),
         "insurance_id_number": _first_present(record, "insurance_id_number", "member_id", "subscriber_id"),
-        "insurance_group_number": _first_present(record, "insurance_group_number", "group_id", "group_number"),
+        "insurance_group_number": _first_present(record, "insurance_group_number", "group_id", "group_number", "plan_id"),
+        "insurance_payer_id": _first_present(record, "insurance_payer_id", "payer_id", "payor_id"),
     }
 
     return _strip_empty(payload)
@@ -1548,7 +2526,49 @@ def _map_procedure(record: dict, doctor_id: Optional[int], patient_id: Optional[
     return _strip_empty(payload)
 
 
+_NOT_PROVIDED = "Not Provided."
+
+# Free-text (narrative) fields per DrChrono resource that should display "Not Provided."
+# when the source is empty. ONLY string fields DrChrono accepts as free text — never
+# ids, enums, numbers, dates, booleans, or codes (those stay omitted, or DrChrono 400s).
+_TEXT_DEFAULT_FIELDS = {
+    "medication":        ("notes", "indication", "frequency", "route", "signature_note", "pharmacy_note"),
+    "condition":         ("notes",),
+    "allergy":           ("reaction", "notes"),
+    "encounter":         ("reason", "notes"),
+    "diagnostic_report": ("notes",),
+    "service_request":   ("notes",),
+    "procedure":         ("notes",),
+}
+
+# Map every resource-key alias to its canonical entry in _TEXT_DEFAULT_FIELDS.
+_RESOURCE_ALIASES = {
+    "medications": "medication",
+    "conditions": "condition", "problem": "condition", "problems": "condition", "problem_list": "condition",
+    "allergies": "allergy",
+    "encounters": "encounter", "appointment": "encounter", "appointments": "encounter",
+    "diagnostic_reports": "diagnostic_report", "report": "diagnostic_report", "reports": "diagnostic_report",
+    "service_requests": "service_request",
+    "procedures": "procedure",
+}
+
+
+def _apply_text_defaults(payload: dict, resource_key: str) -> dict:
+    """Fill the resource's designated free-text fields with 'Not Provided.' when empty.
+    Typed fields (ids/enums/numbers/dates/booleans/codes) are never touched."""
+    canonical = _RESOURCE_ALIASES.get(resource_key.lower(), resource_key.lower())
+    for field in _TEXT_DEFAULT_FIELDS.get(canonical, ()):
+        if payload.get(field) in (None, "", [], {}):
+            payload[field] = _NOT_PROVIDED
+    return payload
+
+
 def _map_record(resource_key: str, record: dict, doctor_id: Optional[int] = None, patient_id: Optional[int] = None) -> dict:
+    payload = _map_record_dispatch(resource_key, record, doctor_id=doctor_id, patient_id=patient_id)
+    return _apply_text_defaults(payload, resource_key)
+
+
+def _map_record_dispatch(resource_key: str, record: dict, doctor_id: Optional[int] = None, patient_id: Optional[int] = None) -> dict:
     key = resource_key.lower()
 
     if key in ("patient", "patients"):
@@ -1839,6 +2859,44 @@ def _upload_document(record: dict, token: str, doctor_id: Optional[int], patient
         }
 
 
+# Unicode punctuation the latin-1 PDF encoder can't represent (it would render them as
+# '?'). Mapped to safe ASCII equivalents before encoding.
+_PDF_CHAR_FIXUPS = {
+    "—": "-", "–": "-",                 # em / en dash  (the "Report — Lab" bug)
+    "‘": "'", "’": "'",                 # curly single quotes
+    "“": '"', "”": '"',                 # curly double quotes
+    "…": "...", "•": "-", "·": "-",  # ellipsis / bullets
+    " ": " ", "→": "->", "≥": ">=", "≤": "<=",
+}
+
+
+def _pdf_safe(text: str) -> str:
+    """Replace unicode punctuation the latin-1 PDF encoder would turn into '?'."""
+    if not text:
+        return ""
+    for bad, good in _PDF_CHAR_FIXUPS.items():
+        text = text.replace(bad, good)
+    return text
+
+
+def _structure_findings(text: str) -> str:
+    """Format a findings/conclusion blob for the PDF.
+
+    Text that already carries its own structure (headings + line breaks, e.g. an echo
+    report) is left intact. A dense single paragraph is split into one bullet per
+    sentence so it reads as a structured list instead of a wall of text. Decimals
+    (no space after the dot) and the common 'X. Capital' abbreviations are preserved."""
+    text = (text or "").strip()
+    if not text:
+        return ""
+    if text.count("\n") >= 2:                      # already structured — keep as-is
+        return text
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+(?=[A-Z(])", text) if s.strip()]
+    if len(sentences) <= 1:
+        return text
+    return "\n".join(f"- {s}" for s in sentences)
+
+
 def _render_report_pdf(title: str, report_date: str, body_text: str, meta: dict) -> bytes:
     """Render a diagnostic-report narrative into a (multi-page) PDF — stdlib only.
 
@@ -1854,7 +2912,7 @@ def _render_report_pdf(title: str, report_date: str, body_text: str, meta: dict)
     USABLE = PAGE_W - 2 * M
 
     def esc(s: str) -> str:
-        s = (s or "").encode("latin-1", "replace").decode("latin-1")
+        s = _pdf_safe(s or "").encode("latin-1", "replace").decode("latin-1")
         return s.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
 
     # Build (font, size, text) lines, wrapping each by an approximate char width.
@@ -1865,6 +2923,7 @@ def _render_report_pdf(title: str, report_date: str, body_text: str, meta: dict)
         if val:
             raw.append(("F1", 10, f"{label}: {val}"))
     raw.append(("F1", 6, ""))                 # spacer
+    raw.append(("F2", 12, "Findings / Conclusion"))           # body heading
     raw.append(("F1", 11, body_text or "(no report text)"))   # report narrative
 
     lines: list[tuple[str, int, str]] = []
@@ -1957,18 +3016,45 @@ def _upload_diagnostic_report_as_document(
         record, "date", "date_report", "document_date", "effective_dt",
         "effectiveDateTime", "report_date",
     )) or _today_date()
-    body_text = _first_present(
+    body_text = _structure_findings(_first_present(
         record, "test_notes", "conclusion_text", "notes", "conclusion",
         "clinical_information", "text",
-    )
+    ))
+
+    # Test/category and its coding (e.g. 'Laboratory (LOINC 11502-2)').
+    category_text = str(_first_present(record, "category_text", "category", "name_full") or "").strip()
+    category_code = str(_first_present(record, "category_code", "loinc_code") or "").strip()
+    category_vocab = str(record.get("category_code_vocab") or "").strip()
+    if category_text and category_code:
+        category_display = f"{category_text} ({(category_vocab + ' ') if category_vocab else ''}{category_code})"
+    else:
+        category_display = category_text or category_code
+
+    # Conclusion/diagnosis code labeled with its actual vocabulary, not a hardcoded one.
+    conclusion_code = str(_first_present(record, "conclusion_code", "icd10_codes") or "").strip()
+    conclusion_vocab = str(record.get("conclusion_code_vocab") or "").strip()
+
+    provider = _value_to_text(_first_present(
+        record, "practitioner_display", "practitioner_name", "performer_display",
+        "performer", "provider_name", "interpreting_physician",
+    ))
+
     meta = {
-        "Report ID": _first_present(record, "source_report_id", "diagnostic_report_id", "id"),
-        "ICD-10": _first_present(record, "icd10_codes", "conclusion_code"),
+        "Report ID": _first_present(record, "source_report_id", "diagnostic_report_id", "fhir_id", "id"),
+        "Patient ID": patient_id,
+        "Provider": provider,
+        "Category": category_display,
         "Status": _first_present(record, "order_status", "status"),
     }
+    if conclusion_code:
+        meta[conclusion_vocab or "Conclusion Code"] = conclusion_code
+
+    report_title = str(description).strip()
+    if "report" not in report_title.lower():
+        report_title = f"Diagnostic Report — {report_title}"
 
     try:
-        pdf_bytes = _render_report_pdf(description, report_date, body_text, meta)
+        pdf_bytes = _render_report_pdf(report_title, report_date, body_text, meta)
     except Exception as e:
         log.error("PDF generation failed for diagnostic report: %s", e)
         return {"success": False, "status_code": 0, "drchrono_id": None,
@@ -2043,6 +3129,46 @@ _NOTE_SECTION_FIELDS = [
 ]
 
 
+
+_CLINICAL_NOTE_FIELD_MAP = [
+    (206682180, ("note_date", "clinical_note_date", "date", "encounter_date", "start_dt")),
+    (206682181, ("provider_name", "practitioner_display", "practitioner_name", "doctor_name", "author", "performer_name")),
+    (206682182, ("note_category", "note_type", "clinical_note_type", "type", "document_type", "title")),
+    (206682183, ("chief_complaint", "reason", "reason_name_full", "reason_full_name", "visit_reason", "description")),
+    (206682184, ("history_of_present_illness", "hpi", "subjective", "history", "narrative", "clinical_summary")),
+    (206682185, ("review_of_systems", "ros")),
+    (206682186, ("current_medications", "medications", "medication_summary")),
+    (206682187, ("family_history",)),
+    (206682188, ("social_history",)),
+    (206682189, ("physical_exam", "exam", "objective", "physical_examination")),
+    (206682190, ("diagnostic_reports", "diagnostic_report", "ecg", "ekg", "electrocardiogram", "ecg_report", "cardiac_report")),
+    (206682191, ("assessment", "diagnosis_summary", "impression")),
+    (206682192, ("plan", "treatment_plan", "care_plan")),
+    (206682193, ("disposition", "condition_at_discharge", "discharge_disposition")),
+    (206682194, ("status", "note_status", "clinical_note_status")),
+    (206682195, ("lab_results", "labs", "diagnostic_results", "diagnostics", "laboratory_results")),
+]
+
+_CLINICAL_NOTE_PASSTHROUGH_FIELDS = {
+    "appointment", "appointment_id", "source_appointment_id", "source_encounter_id", "encounter_id",
+    "note_date", "clinical_note_date", "date", "start_dt", "provider_name", "practitioner_display", "practitioner_name",
+    "doctor_name", "author", "performer_name", "note_category", "note_type", "clinical_note_type", "type",
+    "document_type", "title", "reason", "reason_name_full", "reason_full_name", "visit_reason",
+    "description", "chief_complaint", "history_of_present_illness", "hpi", "subjective", "history",
+    "narrative", "clinical_summary", "review_of_systems", "ros", "current_medications",
+    "medications", "medication_summary", "family_history", "social_history", "physical_exam", "exam",
+    "objective", "physical_examination", "diagnostic_reports", "diagnostic_report", "ecg", "ekg", "electrocardiogram", "ecg_report",
+    "cardiac_report", "assessment", "diagnosis_summary", "impression", "plan", "treatment_plan",
+    "care_plan", "disposition", "condition_at_discharge", "discharge_disposition", "status", "note_status", "clinical_note_status", "lab_results",
+    "labs", "diagnostic_results", "diagnostics", "laboratory_results", "vital_signs", "vitals",
+    "height", "height_units", "weight", "weight_units", "temperature", "temperature_units",
+    "blood_pressure_1", "blood_pressure_2", "systolic_bp", "diastolic_bp", "vital_bp", "pulse",
+    "respiratory_rate", "oxygen_saturation", "spo2", "pain", "pain_scale", "head_circumference",
+    "head_circumference_units", "weight_for_length_percentile",
+    "head_occipital_frontal_circumference_percentile", "bmi_percentile", "oxygen_concentration",
+    "inhaled_oxygen_flow_rate", "smoking_status", "status", "exam_room", "scheduled_time",
+    "patient", "office", "doctor",
+}
 def _aggregate_clinical_notes(records: list) -> list:
     """Group clinical-note rows by note id into one record per note.
 
@@ -2067,6 +3193,9 @@ def _aggregate_clinical_notes(records: list) -> list:
             }
             order.append(nid)
         grp = groups[nid]
+        for col in _CLINICAL_NOTE_PASSTHROUGH_FIELDS:
+            if not grp.get(col) and rec.get(col) not in (None, "", [], {}):
+                grp[col] = rec.get(col)
         # vital_signs may arrive on any row (e.g. raw note file) — keep the first seen.
         if not grp.get("vital_signs"):
             grp["vital_signs"] = _first_present(rec, "vital_signs", "vitals")
@@ -2154,7 +3283,7 @@ def _upload_clinical_note_as_document(
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Clinical notes → DrChrono yellow_notepad
+# Clinical notes -> DrChrono clinical_note_field_values + appointment vitals
 # ═══════════════════════════════════════════════════════════════════════════════
 # Fixed DrChrono clinical-note template for this practice (never changes).
 TEMPLATE_ID = 7520906
@@ -2189,6 +3318,34 @@ def _temp_to_fahrenheit(raw: str) -> str:
     return f"{round(c * 9 / 5 + 32, 1)}" if c <= 45 else f"{round(c, 1)}"
 
 
+def _height_to_inches(raw: str, suffix: str = "") -> str:
+    """DrChrono stores height in inches. Source heights are often metric (e.g. 175 cm).
+    Convert when the source unit is cm — detected from the text following the value, or
+    by magnitude (>96 in is an implausible adult height, so it must be cm)."""
+    try:
+        v = float(raw)
+    except (TypeError, ValueError):
+        return raw
+    is_cm = bool(re.search(r"cm|centimet", suffix, re.I))
+    is_in = bool(re.search(r'\bin\b|inch|"', suffix, re.I))
+    if is_cm or (v > 96 and not is_in):
+        return f"{round(v / 2.54, 1)}"
+    return f"{round(v, 1)}"
+
+
+def _weight_to_lbs(raw: str, suffix: str = "") -> str:
+    """DrChrono stores weight in lbs. Source weights are often metric (e.g. 88 kg).
+    Convert when the source unit is kg — detected from the text following the value
+    (magnitude alone is ambiguous, so kg/lb must be explicit to convert)."""
+    try:
+        v = float(raw)
+    except (TypeError, ValueError):
+        return raw
+    if re.search(r"kg|kilo", suffix, re.I):
+        return f"{round(v * 2.20462, 1)}"
+    return f"{round(v, 1)}"
+
+
 def _format_vitals(text: str) -> str:
     """Regex-parse a free-text vital_signs string into the fixed 9-field line.
     Missing vitals render as 'Not provided' so the layout is always consistent
@@ -2197,10 +3354,15 @@ def _format_vitals(text: str) -> str:
     for label, pattern, unit in _VITAL_PATTERNS:
         m = re.search(pattern, text, flags=re.IGNORECASE)
         if m:
+            suffix = text[m.end():m.end() + 8]
             if label == "BP":
                 val = re.sub(r"\s*", "", m.group(1))
             elif label == "Temperature":
                 val = _temp_to_fahrenheit(m.group(1).strip())
+            elif label == "Height":
+                val = _height_to_inches(m.group(1).strip(), suffix)
+            elif label == "Weight":
+                val = _weight_to_lbs(m.group(1).strip(), suffix)
             else:
                 val = m.group(1).strip()
             parts.append(f"{label}: {val}{unit}")
@@ -2212,7 +3374,7 @@ def _format_vitals(text: str) -> str:
 def _build_note_content(note: dict) -> str:
     """Assemble the yellow_notepad content string: clinical narrative only.
 
-    Vitals are pushed to the appointment's vitals section (PATCH), so they are NOT
+    Vitals are pushed to the appointment's vitals section (PUT), so they are NOT
     repeated here — the note carries just CC/HPI/Assessment/Plan."""
     sec = {label: value for (label, value) in note.get("sections", [])}
 
@@ -2298,7 +3460,7 @@ def _refresh_access_token() -> Optional[str]:
             )
             return new_access
     except Exception as e:
-        log.warning("yellow_notepad token refresh failed: %s", e)
+        log.warning("DrChrono token refresh failed: %s", e)
     return None
 
 
@@ -2360,12 +3522,126 @@ def _build_vitals_payload(note: dict) -> dict:
     if spo2 is not None:   vitals["oxygen_saturation"] = spo2
     if pain is not None:   vitals["pain"] = str(pain)
 
-    return {"vitals": vitals, "status": "Checked In"}
+    direct_vital_fields = {
+        "height": float, "weight": float, "temperature": float,
+        "blood_pressure_1": int, "blood_pressure_2": int, "pulse": int,
+        "respiratory_rate": int, "oxygen_saturation": int, "head_circumference": float,
+        "weight_for_length_percentile": float,
+        "head_occipital_frontal_circumference_percentile": float,
+        "bmi_percentile": float, "oxygen_concentration": float,
+        "inhaled_oxygen_flow_rate": float,
+    }
+    for key, cast in direct_vital_fields.items():
+        value = note.get(key)
+        if value not in (None, "", [], {}, "Not provided"):
+            try:
+                vitals[key] = cast(float(value))
+            except (TypeError, ValueError):
+                pass
+    for key in ("height_units", "weight_units", "temperature_units", "head_circumference_units", "smoking_status", "pain"):
+        value = note.get(key)
+        if value not in (None, "", [], {}, "Not provided"):
+            vitals[key] = value
+
+    payload = {"vitals": vitals, "status": _first_present(note, "status", default="Checked In")}
+    for key in ("exam_room", "scheduled_time", "patient", "office", "doctor"):
+        value = note.get(key)
+        if value not in (None, "", [], {}):
+            payload[key] = value
+    return payload
 
 
-def _patch_appointment_vitals(appt_id, payload: dict, token: str) -> dict:
-    """PATCH structured vitals onto the appointment. Success = 204 No Content.
-    Refreshes the token once on 401 and retries up to 3x on 429/5xx (2s backoff)."""
+def _clinical_text(value: Any) -> str:
+    if value in (None, "", [], {}):
+        return ""
+    if isinstance(value, (dict, list)):
+        try:
+            return json.dumps(value, ensure_ascii=False)
+        except Exception:
+            return str(value)
+    return str(value).strip().strip('"')
+
+
+def _clinical_note_field_payloads(note: dict, appt_id) -> list[dict]:
+    payloads: list[dict] = []
+    seen: set[int] = set()
+    explicit_field = _first_present(note, "clinical_note_field", "field_type")
+    explicit_value = _first_present(note, "value", "note_text", "clinical_note", "text")
+    if explicit_field and explicit_value not in (None, "", [], {}):
+        try:
+            field_id = int(explicit_field)
+        except (TypeError, ValueError):
+            field_id = explicit_field
+        payloads.append({"clinical_note_field": field_id, "appointment": int(appt_id), "value": _clinical_text(explicit_value)})
+        if isinstance(field_id, int):
+            seen.add(field_id)
+
+    for field_id, keys in _CLINICAL_NOTE_FIELD_MAP:
+        if field_id in seen:
+            continue
+        value = _first_present(note, *keys)
+        if value in (None, "", [], {}):
+            continue
+        payloads.append({"clinical_note_field": field_id, "appointment": int(appt_id), "value": _clinical_text(value)})
+        seen.add(field_id)
+
+    for label, value in note.get("sections", []) or []:
+        normalized = str(label or "").strip().lower().replace(" ", "_")
+        for field_id, keys in _CLINICAL_NOTE_FIELD_MAP:
+            if field_id in seen:
+                continue
+            if normalized in {str(k).lower() for k in keys}:
+                payloads.append({"clinical_note_field": field_id, "appointment": int(appt_id), "value": _clinical_text(value)})
+                seen.add(field_id)
+                break
+    return payloads
+
+
+def _post_clinical_note_field_values(payloads: list[dict], token: str) -> dict:
+    if not payloads:
+        return {"success": False, "status_code": 0, "drchrono_id": None,
+                "error": "No clinical note field values found to push.", "already_exists": False,
+                "retryable": False}
+    url = f"{config.DRCHRONO_API_BASE}clinical_note_field_values"
+    tok = token
+    pushed_ids = []
+    errors = []
+    last_status = 0
+    for payload in payloads:
+        try:
+            resp = requests.post(url, json=payload, headers=_json_headers(tok), timeout=30)
+            if resp.status_code == 401:
+                new_tok = _refresh_access_token()
+                if new_tok:
+                    tok = new_tok
+                    resp = requests.post(url, json=payload, headers=_json_headers(tok), timeout=30)
+            last_status = resp.status_code
+            log.info("POST %s field=%s appt=%s -> %s", url, payload.get("clinical_note_field"), payload.get("appointment"), resp.status_code)
+            if resp.status_code in (200, 201):
+                try:
+                    pushed_ids.append(resp.json().get("id"))
+                except Exception:
+                    pushed_ids.append(payload.get("clinical_note_field"))
+            else:
+                errors.append(resp.text[:500])
+        except Exception as e:
+            errors.append(str(e))
+            last_status = 0
+    if errors:
+        return {"success": False, "status_code": last_status, "drchrono_id": pushed_ids[-1] if pushed_ids else None,
+                "error": " | ".join(errors[:3]), "already_exists": False,
+                "retryable": last_status == 0 or last_status >= 500}
+    return {"success": True, "status_code": last_status or 201, "drchrono_id": pushed_ids[-1] if pushed_ids else None,
+            "error": "", "already_exists": False, "field_count": len(payloads)}
+
+def _put_appointment_vitals(appt_id, payload: dict, token: str) -> dict:
+    """PATCH structured vitals onto the appointment. Success = 200/204.
+
+    Uses PATCH (partial update) — NOT PUT. A PUT replaces the whole appointment and
+    requires every mandatory field (scheduled_time, duration, office, exam_room, ...),
+    so a vitals-only PUT 400s and the vitals silently never persist. PATCH matches the
+    DrChrono 'Patch_appointment_vitals' reference. Refreshes the token once on 401 and
+    retries up to 3x on 429/5xx (2s backoff)."""
     url = f"{config.DRCHRONO_API_BASE}appointments/{appt_id}"
     tok = token
     for attempt in range(3):
@@ -2381,8 +3657,8 @@ def _patch_appointment_vitals(appt_id, payload: dict, token: str) -> dict:
         if resp.status_code in (429, 500, 502, 503) and attempt < 2:
             time.sleep(2)
             continue
-        if resp.status_code == 204:
-            # Verify DrChrono actually persisted the vitals: a 204 is returned even
+        if resp.status_code in (200, 204):
+            # Verify DrChrono actually persisted the vitals: a 2xx is returned even
             # when an unknown field is silently ignored. GET the appointment back and
             # log what it stored, so we can confirm the vitals really landed.
             try:
@@ -2393,7 +3669,7 @@ def _patch_appointment_vitals(appt_id, payload: dict, token: str) -> dict:
                              appt_id, appt.get("status"), str(appt.get("vitals"))[:400])
             except Exception as e:
                 log.warning("Vitals verify GET failed: %s", e)
-            return {"ok": True, "status_code": 204, "error": ""}
+            return {"ok": True, "status_code": resp.status_code, "error": ""}
         return {"ok": False, "status_code": resp.status_code, "error": resp.text[:500]}
     return {"ok": False, "status_code": 0, "error": "retries exhausted"}
 
@@ -2401,77 +3677,37 @@ def _patch_appointment_vitals(appt_id, payload: dict, token: str) -> dict:
 def _push_clinical_note_yellow_notepad(
     note: dict, token: str, doctor_id: Optional[int], patient_id: Optional[int]
 ) -> dict:
-    """Dual push for one clinical note:
-      STEP 1 — PATCH vitals to /api/appointments/{appointment_id}  (success = 204)
-      STEP 2 — POST the note to /api/yellow_notepad (appointment_id + template_id as
-               query params; body holds only `content`).
-    Vitals are best-effort (a vitals failure is logged but does not drop the note).
-    On 401 the token is refreshed and the request retried.
+    """Push one clinical note via DrChrono clinical note field values.
+
+    Vitals are written to /api/appointments/{appointment_id} with PUT. Narrative
+    sections are written to /api/clinical_note_field_values. Vitals are
+    best-effort; a vitals failure is returned as detail but does not block note
+    field creation.
     """
     appt_id = _resolve_appointment_id(note)
     if not appt_id:
-        # Fallback: look the appointment up live from DrChrono by patient + date.
         appt_id = _lookup_appointment_id(token, patient_id, note.get("note_date"))
     if not appt_id:
-        # No appointment exists for this note (e.g. its encounter is pre-2000 and was
-        # never created as an appointment). Don't drop the note — upload its content as
-        # a PDF document so it still lands in the patient chart.
-        log.info("Clinical note %s has no appointment — uploading as a document instead.",
+        log.info("Clinical note %s has no appointment - uploading as a document instead.",
                  note.get("source_note_id"))
         return _upload_clinical_note_as_document(note, token, doctor_id, patient_id)
 
-    content = _build_note_content(note)
-
-    # ── STEP 1: PATCH structured vitals onto the appointment ──
     vitals_payload = _build_vitals_payload(note)
-    vitals_result = _patch_appointment_vitals(appt_id, vitals_payload, token)
+    vitals_result = _put_appointment_vitals(appt_id, vitals_payload, token)
     if vitals_result["ok"]:
-        log.info("Vitals PATCH appt=%s -> 204 (%d vitals)", appt_id, len(vitals_payload["vitals"]))
+        log.info("Vitals PUT appt=%s -> 204 (%d vitals)", appt_id, len(vitals_payload["vitals"]))
     else:
-        log.warning("Vitals PATCH appt=%s -> %s %s", appt_id,
+        log.warning("Vitals PUT appt=%s -> %s %s", appt_id,
                     vitals_result["status_code"], vitals_result["error"][:200])
-    url = f"{config.DRCHRONO_API_BASE}yellow_notepad"
-    params = {"appointment_id": str(appt_id), "template_id": TEMPLATE_ID}
-    body = {"content": content}
 
-    def _post(tok: str):
-        return requests.post(url, params=params, json=body, headers=_json_headers(tok), timeout=30)
-
-    try:
-        log.info("POST %s?appointment_id=%s&template_id=%s (note %s)",
-                 url, appt_id, TEMPLATE_ID, note.get("source_note_id"))
-        resp = _post(token)
-        if resp.status_code == 401:
-            new_tok = _refresh_access_token()
-            if new_tok:
-                resp = _post(new_tok)
-        log.info("DrChrono response: %d — %s", resp.status_code, resp.text[:400])
-
-        vitals_code = vitals_result["status_code"]
-        vitals_tag = "Vitals 204 ✓" if vitals_result["ok"] else f"Vitals failed ({vitals_code}) ✗"
-        vitals_note = "" if vitals_result["ok"] else f" | {vitals_tag}"
-
-        if resp.status_code in (200, 201):
-            try:
-                nid = resp.json().get("id")
-            except Exception:
-                nid = None
-            # Dual status: note pushed; vitals reported alongside (best-effort).
-            return {"success": True, "status_code": resp.status_code,
-                    "drchrono_id": nid, "error": "", "already_exists": False,
-                    "vitals_status": vitals_code,
-                    "detail": f"{vitals_tag} · Note {resp.status_code} ✓"}
-
-        # 400 = bad appointment_id / template mismatch — surface the full body.
-        return {"success": False, "status_code": resp.status_code, "drchrono_id": None,
-                "error": resp.text[:1000] + vitals_note, "already_exists": False,
-                "vitals_status": vitals_code, "retryable": resp.status_code >= 500}
-    except Exception as e:
-        return {"success": False, "status_code": 0, "drchrono_id": None,
-                "error": str(e), "already_exists": False}
-    finally:
-        time.sleep(0.3)  # 300 ms between yellow_notepad requests
-
+    field_payloads = _clinical_note_field_payloads(note, appt_id)
+    note_result = _post_clinical_note_field_values(field_payloads, token)
+    note_result["vitals_status"] = vitals_result["status_code"]
+    note_result["detail"] = (
+        f"Vitals {vitals_result['status_code']}"
+        if vitals_result["ok"] else f"Vitals failed ({vitals_result['status_code']})"
+    )
+    return note_result
 
 def _upload_coverage(record: dict, token: str, doctor_id: Optional[int], patient_id: Optional[int]) -> dict:
     """Create a patient insurance via POST /api/insurances.
@@ -2777,8 +4013,9 @@ def _build_lab_result_payload(obs: dict, note: Optional[dict],
     payload = {
         "ordering_doctor": int(doctor_id) if doctor_id else None,
         "patient": int(patient_id) if patient_id else None,
-        "title": _first_present(obs, "name_full", "name_short", "name_rx", "test_name", "code",
-                                default="Lab Result"),
+        "title": (_first_present(obs, "name_full", "name_short", "name_rx", "test_name", "code")
+                  or _first_present(note, "name_full", "name_short", "name_rx", "test_name")
+                  or "Lab Result"),
         "lab_result_value": _lab_result_value_str(
             _first_present(obs, "value"),
             _first_present(obs, "value_unit", "units"),
@@ -2807,6 +4044,23 @@ def _build_lab_result_payload(obs: dict, note: Optional[dict],
     code = _first_present(obs, "code")
     if code and str(_first_present(obs, "code_vocab")).strip().upper() == "LOINC":
         payload["loinc_code"] = str(code)
+
+    # Neither observations.csv nor observationnotes.csv carries an appointment id or a
+    # document id — only encounter_id. So both are resolved through the encounter: the
+    # appointment via appointment_registry, the scanned diagnostic report via doc_registry.
+    # Lab orders expose them as the 'appointment' field and the 'documents' array
+    # ('Scanned in result' in the UI).
+    appointment = _medication_appointment(obs) or _medication_appointment(note)
+    if appointment:
+        try:
+            payload["appointment"] = int(appointment)
+        except (TypeError, ValueError):
+            payload["appointment"] = appointment
+
+    document_id = _resolve_document_id(obs) or _resolve_document_id(note)
+    if document_id:
+        payload["documents"] = [str(document_id)]
+
     return payload
 
 
@@ -2971,12 +4225,79 @@ def _save_appt_registry(reg: dict) -> None:
         log.warning("Could not persist appointment registry: %s", e)
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# Diagnostic-report document registry
+# ═══════════════════════════════════════════════════════════════════════════════
+# Maps a source encounter_id -> the DrChrono document id created for that encounter's
+# diagnostic report. Observations sharing the encounter attach to it via the lab
+# result 'document' field (the 'File' column in DrChrono). Persisted across restarts.
+_DOC_ID_MAP: dict = {}
+_DOC_REGISTRY: dict = {}
+_DOC_REGISTRY_FILE = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),  # -> backend/
+    "document_registry.json",
+)
+
+
+def _load_doc_registry() -> dict:
+    try:
+        with open(_DOC_REGISTRY_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, dict) else {}
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+
+
+def _save_doc_registry(reg: dict) -> None:
+    try:
+        with open(_DOC_REGISTRY_FILE, "w", encoding="utf-8") as f:
+            json.dump(reg, f, indent=2)
+    except OSError as e:
+        log.warning("Could not persist document registry: %s", e)
+
+
+def _remember_document_id(key: str, record: dict, result: dict) -> None:
+    """After a diagnostic report uploads as a document, store its DrChrono document id
+    keyed by every source encounter id on the row, so observations sharing that encounter
+    attach to it (the 'File' column on a DrChrono lab result)."""
+    if key not in ("diagnostic_report", "diagnostic_reports", "report", "reports"):
+        return
+    doc_id = result.get("drchrono_id")
+    if not doc_id:
+        return
+    for k in ("source_encounter_id", "encounter_id", "encounter_fhir_id", "encounter_csn",
+              "diagnostic_report_id", "fhir_id", "id"):
+        v = record.get(k)
+        if v not in (None, ""):
+            _DOC_ID_MAP[str(v)] = doc_id
+            _DOC_REGISTRY[str(v)] = doc_id
+    _save_doc_registry(_DOC_REGISTRY)
+
+
+def _resolve_document_id(record: dict):
+    """Resolve the diagnostic-report document id for an observation via its encounter id."""
+    for k in ("source_encounter_id", "encounter_id", "encounter_fhir_id", "encounter_csn"):
+        v = record.get(k)
+        if v not in (None, "") and str(v) in _DOC_ID_MAP:
+            return _DOC_ID_MAP[str(v)]
+    return None
+
+
 def _load_registry_into_memory() -> None:
     """Load the persisted registry at the start of a push run, so existence checks and
     clinical-note appointment resolution survive restarts."""
     _APPT_REGISTRY.clear()
     _APPT_REGISTRY.update(_load_appt_registry())
+    # Seed the resolver map too. _medication_appointment / _resolve_appointment_id read
+    # _APPT_ID_MAP, so without this, appointment tagging for medication/condition/notes
+    # only works when the parent encounter is (re)pushed in the SAME run. Seeding from the
+    # persisted registry lets a resource tag to an appointment created in a PRIOR run.
     _APPT_ID_MAP.update(_APPT_REGISTRY)
+    # Same for diagnostic-report documents, so observations can attach to a report
+    # uploaded in a prior run.
+    _DOC_REGISTRY.clear()
+    _DOC_REGISTRY.update(_load_doc_registry())
+    _DOC_ID_MAP.update(_DOC_REGISTRY)
 
 
 def _appt_source_id(record: dict, key: str) -> str:
@@ -2986,17 +4307,48 @@ def _appt_source_id(record: dict, key: str) -> str:
     return str(_first_present(record, "source_appointment_id", "appointment_id", "id") or "").strip()
 
 
-def _appt_already_exists(record: dict, key: str) -> Optional[dict]:
+def _drop_cached_appt(src: str) -> None:
+    """Remove a stale source-id to appointment-id mapping from memory and disk."""
+    _APPT_REGISTRY.pop(src, None)
+    _APPT_ID_MAP.pop(src, None)
+    _save_appt_registry(_APPT_REGISTRY)
+
+
+def _cached_appt_exists(token: str, appt_id) -> bool:
+    """Return True only when DrChrono confirms the cached appointment exists."""
+    if not appt_id:
+        return False
+    url = f"{config.DRCHRONO_API_BASE}appointments/{appt_id}"
+    try:
+        resp = requests.get(url, headers=_json_headers(token), timeout=15)
+        log.info("Verify cached appointment GET %s status=%d", url, resp.status_code)
+        return resp.status_code == 200
+    except Exception as e:
+        log.warning("Could not verify cached appointment %s: %s", appt_id, e)
+        return False
+
+
+def _appt_already_exists(record: dict, key: str, token: str) -> Optional[dict]:
     """Idempotency check — if this appointment/encounter was already created, return an
     'already exists' result (no duplicate POST). Returns None if it's new."""
     src = _appt_source_id(record, key)
     if not src or src not in _APPT_REGISTRY:
         return None
+    appt_id = _APPT_REGISTRY[src]
+    if not _cached_appt_exists(token, appt_id):
+        log.info(
+            "Cached appointment is stale; will create a new one (source_id=%s -> appt %s)",
+            src,
+            appt_id,
+        )
+        _drop_cached_appt(src)
+        return None
     is_enc = key in ("encounter", "encounters")
     msg = "Encounter already exists" if is_enc else "Appointment already exists"
-    log.info("Idempotent skip: %s (source_id=%s -> appt %s)", msg, src, _APPT_REGISTRY[src])
+    _APPT_ID_MAP[src] = appt_id
+    log.info("Idempotent skip: %s (source_id=%s -> appt %s)", msg, src, appt_id)
     return {
-        "success": True, "status_code": 200, "drchrono_id": _APPT_REGISTRY[src],
+        "success": True, "status_code": 200, "drchrono_id": appt_id,
         "error": "", "already_exists": True, "message": msg, "detail": msg,
     }
 
@@ -3043,10 +4395,10 @@ def _live_push_record(
             record, token, doctor_id=doctor_id, patient_id=patient_id
         )
 
-    # Clinical notes are pushed to DrChrono /api/yellow_notepad (template 7520906),
-    # with vitals + CC/HPI/Assessment/Plan as the note content. The records arriving
-    # here are note-level (aggregated in generate()), and the appointment_id is
-    # resolved from appointments pushed earlier in the same run.
+    # Clinical notes are pushed to DrChrono field values, with structured vitals
+    # written back to the appointment first. The records arriving here are
+    # note-level (aggregated in generate()), and the appointment_id is resolved
+    # from appointments pushed earlier in the same run.
     if key in ("clinical_note", "clinical_notes"):
         return _push_clinical_note_yellow_notepad(
             record, token, doctor_id=doctor_id, patient_id=patient_id
@@ -3091,7 +4443,7 @@ def _live_push_record(
     # Idempotency: if this appointment/encounter id was already created, skip the
     # create and return an 'already exists' response (no duplicate in DrChrono).
     if key in ("encounter", "encounters", "appointment", "appointments"):
-        existing = _appt_already_exists(record, key)
+        existing = _appt_already_exists(record, key, token)
         if existing:
             return existing
 
@@ -3495,6 +4847,9 @@ def push_run_stream(req: PushRequest):
         stats: dict[str, dict] = {}
         current_patient_id = req.patient_id
         already_exists_total = 0
+        # Record-level logging + tracking for this run (integration.log / failed_records
+        # .xlsx / processing_summary.json + frontend failure feed).
+        svc = LoggingService()
         # _APPT_ID_MAP persists across runs (see push_run); live lookup is the fallback.
 
         for key in ordered:
@@ -3533,8 +4888,22 @@ def push_run_stream(req: PushRequest):
                         doctor_id=doctor_id, patient_id=current_patient_id,
                     )
                     _remember_appointment_id(key, record, result)
+                    _remember_document_id(key, record, result)
 
                 latency_ms = int((time.time() - t0) * 1000)
+
+                # Record-level log + failure tracking (never breaks the push).
+                svc.log_record(
+                    resource_type=key,
+                    row=idx + 1,
+                    record=record,
+                    result=result,
+                    endpoint=_endpoint_for(key),
+                    request_payload=None if req.dry_run else _payload_for_logging(
+                        key, record, doctor_id, current_patient_id),
+                    drchrono_patient_id=current_patient_id,
+                    latency_ms=latency_ms,
+                )
 
                 if result.get("already_exists"):
                     already_exists_count += 1
@@ -3586,6 +4955,10 @@ def push_run_stream(req: PushRequest):
                 "already_exists": already_exists_count, "errors": errors[:5],
             }
 
+        # Write integration artifacts and expose this run's failures to the frontend.
+        record_summary = svc.finalize()
+        set_last_run(svc)
+
         summary = {
             "type": "summary",
             "total": sum(s["total"] for s in stats.values()),
@@ -3594,6 +4967,9 @@ def push_run_stream(req: PushRequest):
             "already_exists": already_exists_total,
             "patient_id": current_patient_id,
             "stats": stats,
+            "run_id": svc.run_id,
+            "record_summary": record_summary,
+            "failed_records": svc.failures,
         }
         yield json.dumps(summary) + "\n"
 
@@ -3601,6 +4977,37 @@ def push_run_stream(req: PushRequest):
         generate(),
         media_type="application/x-ndjson",
         headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
+    )
+
+
+@router.get("/failures")
+def push_failures(limit: int = 500):
+    """Records that failed to push in the most recent run — for the frontend
+    'which record failed' table. Empty until a run has executed."""
+    svc = get_last_run()
+    if not svc:
+        return {"run_id": None, "summary": None, "failures": []}
+    return {"run_id": svc.run_id, "summary": svc.summary(), "failures": svc.failures[:limit]}
+
+
+@router.get("/summary")
+def push_summary():
+    """processing_summary.json for the most recent run (per-resource pass/fail)."""
+    svc = get_last_run()
+    return svc.summary() if svc else {"run_id": None, "total_records": 0}
+
+
+@router.get("/failed-records.xlsx")
+def download_failed_records():
+    """Download the failed_records.xlsx for the most recent run."""
+    from app.services.logging_service import FAILED_XLSX
+
+    if not FAILED_XLSX.exists():
+        raise HTTPException(status_code=404, detail="No failed_records.xlsx yet — run a push first.")
+    return FileResponse(
+        str(FAILED_XLSX),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename="failed_records.xlsx",
     )
 
 
@@ -3676,3 +5083,27 @@ async def push_document_file(
         metatags=metatags,
         archived=archived,
     )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

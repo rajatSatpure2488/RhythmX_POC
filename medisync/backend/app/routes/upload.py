@@ -250,11 +250,23 @@ def _guess_resource_type(rtype_or_name: str) -> str:
 # Stable business-identifier fields, tried in order, to detect a duplicate record.
 # fhir_id / revision_id are intentionally excluded — they get regenerated, which is
 # exactly why one patient was showing up as several rows.
+#
+# ORDER MATTERS: a record's OWN primary id must come before any FOREIGN key. A
+# diagnostic report (or medication/condition/allergy) carries both its own id AND an
+# encounter_id; keying on encounter_id wrongly collapses every report in the same
+# encounter into one (74 reports -> 40 encounters). So own-ids first, FKs last.
 _IDENTITY_FIELDS = [
-    "observation_id", "encounter_id", "appointment_id", "note_id",
-    "diagnostic_report_id", "report_id", "medication_id", "condition_id",
-    "allergy_id", "coverage_id", "procedure_id", "immunization_id",
-    "service_request_id", "source_note_id", "source_encounter_id",
+    # Record's own primary id (most specific) — incl. the dataset's pat_*_id columns.
+    "diagnostic_report_id", "report_id", "observation_id",
+    "pat_medication_id", "medication_id",
+    "pat_condition_id", "condition_id",
+    "pat_allergy_id", "allergy_id",
+    "coverage_id", "procedure_id", "immunization_id", "service_request_id",
+    "note_id", "source_note_id",
+    # Primary id for appointment/encounter resources (a foreign key on children, so
+    # only used when no own-id above is present).
+    "appointment_id", "encounter_id", "source_encounter_id",
+    # Patient-level identifiers — last-resort fallback only.
     "medical_record_number", "patient_id", "rx_patient_id", "id",
 ]
 # Volatile/generated columns ignored when content-hashing rows without a stable id.

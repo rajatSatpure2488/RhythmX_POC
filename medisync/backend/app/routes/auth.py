@@ -31,10 +31,26 @@ log = logging.getLogger("medisync.auth")
 # "You do not have permission to perform this action." After changing this,
 # the user MUST re-authenticate (disconnect + reconnect) so a new token is
 # issued with the added scope — existing tokens are NOT upgraded in place.
+# DRCHRONO_SCOPES = (
+#     "user:read patients:read patients:write "
+#     "clinical:read clinical:write calendar:read calendar:write "
+#     "labs:read labs:write billing:read billing:write"
+# )
 DRCHRONO_SCOPES = (
-    "user:read patients:read patients:write "
-    "clinical:read clinical:write calendar:read calendar:write "
-    "labs:read labs:write billing:read billing:write"
+    "user:read "
+    "user:write "
+    "calendar:read "
+    "calendar:write "
+    "patients:read "
+    "patients:write "
+    "patients:summary:read "
+    "patients:summary:write "
+    "billing:read "
+    "billing:write "
+    "clinical:read "
+    "clinical:write "
+    "labs:read "
+    "labs:write"
 )
 
 

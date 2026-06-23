@@ -35,7 +35,9 @@ def test_prepare_document_file_rejects_unsupported_type():
             push._prepare_document_file("report.txt")
 
 
-def test_prepare_document_file_uses_demo_png_for_placeholder():
+def test_prepare_document_file_uploads_as_is_on_magic_mismatch():
+    # When magic bytes don't match the extension, the file is uploaded as-is with the
+    # declared MIME type (the old demo-PNG substitution was removed) — DrChrono decides.
     with (
         patch("pathlib.Path.exists", return_value=True),
         patch("pathlib.Path.is_file", return_value=True),
@@ -44,9 +46,9 @@ def test_prepare_document_file_uses_demo_png_for_placeholder():
     ):
         filename, content, mime_type = push._prepare_document_file("placeholder.pdf")
 
-    assert filename == "placeholder.png"
-    assert content.startswith(b"\x89PNG")
-    assert mime_type == "image/png"
+    assert filename == "placeholder.pdf"
+    assert content == b"demo placeholder"
+    assert mime_type == "application/pdf"
 
 
 def test_build_document_form_payload_maps_drchrono_fields():
@@ -68,20 +70,24 @@ def test_build_document_form_payload_maps_drchrono_fields():
     assert payload["doctor"] == "789"
     assert payload["description"] == "Lab Report"
     assert payload["date"] == "2026-05-20"
-    assert json.loads(payload["metatags"]) == ["lab_results", "urgent"]
+    # DrChrono wants metatags pipe-separated, not JSON (see _document_metatags).
+    assert payload["metatags"] == "lab_results|urgent"
     assert payload["archived"] == "false"
 
 
 def test_reference_endpoint_map_for_push_resources():
-    assert push.ENDPOINT_MAP["observations"] == "clinical_note_field_values"
+    assert push.ENDPOINT_MAP["observations"] == "patient_lab_results"
     assert push.ENDPOINT_MAP["clinical_notes"] == "clinical_note_field_values"
-    assert push.ENDPOINT_MAP["diagnostic_reports"] == "lab_results"
+    # Diagnostic reports are rendered to PDF and pushed to /api/documents.
+    assert push.ENDPOINT_MAP["diagnostic_reports"] == "documents"
     assert push.ENDPOINT_MAP["service_requests"] == "lab_orders"
-    assert push.ENDPOINT_MAP["coverages"] == "patient_insurances"
+    assert push.ENDPOINT_MAP["coverages"] == "insurances"
     assert push.ENDPOINT_MAP["procedures"] == "clinical_note_section_field_values"
 
 
 def test_reference_payload_mapping_for_common_resources():
+    # 'office' is intentionally omitted (filled from a live /api/offices lookup, not the
+    # doctor id), and the encounter_type populates appointment custom field 11474.
     assert push._map_encounter(
         {"start_dt": "2026-05-20T10:00:00", "status": "finished", "encounter_type": "Follow-up"},
         doctor_id=7,
@@ -91,11 +97,11 @@ def test_reference_payload_mapping_for_common_resources():
         "doctor": 7,
         "scheduled_time": "2026-05-20T10:00:00",
         "duration": 30,
-        "office": 7,
         "exam_room": 1,
         "status": "Complete",
         "reason": "Follow-up",
         "allow_overlapping": True,
+        "custom_fields": [{"field_type": 11474, "field_value": "Follow-up"}],
     }
 
     assert push._map_coverage(

@@ -9,8 +9,22 @@ from typing import Any, Optional
 from fastapi import APIRouter
 from pydantic import BaseModel
 
+from app.core.logger import get_api_monitor, get_recent_logs
+
 router = APIRouter()
 log = logging.getLogger("medisync.frontend")
+
+
+@router.get("/recent")
+def recent_logs(limit: int = 200, level: Optional[str] = None, name: Optional[str] = None):
+    """Recent backend+frontend log entries for the UI live-log viewer."""
+    return {"entries": get_recent_logs(limit=limit, level=level, name_contains=name)}
+
+
+@router.get("/api")
+def api_monitor(limit: int = 100, window_seconds: int = 60, rate_limit: int = 29):
+    """API-call activity + req/min rate for the sidebar API Rate Monitor."""
+    return get_api_monitor(limit=limit, window_seconds=window_seconds, rate_limit=rate_limit)
 
 _LEVEL_MAP = {
     "debug":   logging.DEBUG,
