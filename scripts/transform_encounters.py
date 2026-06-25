@@ -1,8 +1,8 @@
 """transform_encounters.py
 
-DrChrono has no encounters endpoint — each encounter is pushed as an appointment
+DrChrono has no encounters endpoint - each encounter is pushed as an appointment
 (/api/appointments). Reads the raw encounters export and writes an appointment-
-shaped CSV. The source file in Dataset/ is never modified.
+shaped CSV using the same enriched field model as appointments.
 """
 import csv
 import os
@@ -18,6 +18,13 @@ def is_null(v):
 
 def g(row, key):
     return (row.get(key) or "").strip()
+
+
+def first_present(*values):
+    for value in values:
+        if not is_null(value):
+            return str(value).strip()
+    return ""
 
 
 def fmt_scheduled_time(v):
@@ -54,32 +61,46 @@ def calc_duration(start_raw, end_raw):
 
 def map_status(v):
     s = (v or "").strip().lower()
-    if s == "completed":
+    if s in ("completed", "complete", "finished"):
         return "Complete"
-    if s == "planned":
+    if s in ("planned", "booked", "scheduled"):
         return "Confirmed"
     if s in ("cancelled", "canceled"):
         return "Cancelled"
-    return ""
+    if s in ("in-progress", "in_progress", "in session"):
+        return "In Session"
+    return "Confirmed"
 
 
-def build_notes(encounter_type, specialty):
+def build_notes(row):
     parts = []
-    if not is_null(encounter_type):
-        parts.append(f"Encounter Type: {encounter_type.strip()}")
-    if not is_null(specialty):
-        parts.append(f"Specialty: {specialty.strip()}")
+    for label, key in (
+        ("Encounter Type", "encounter_type"),
+        ("Class", "class_display"),
+        ("Specialty", "specialty"),
+        ("Service Type", "service_type"),
+        ("Practitioner", "practitioner_display"),
+    ):
+        value = g(row, key)
+        if value:
+            parts.append(f"{label}: {value}")
     return ". ".join(parts)
 
 
 OUTPUT_COLUMNS = [
-    "source_encounter_id",  # encounter_id
-    "source_patient_id",    # rx_patient_id
-    "scheduled_time",       # start_dt (transformed)
-    "status",               # mapped
-    "reason",               # service_type
-    "duration",             # derived from start_dt/end_dt
-    "notes",                # derived from encounter_type + specialty
+    "source_encounter_id",
+    "source_patient_id",
+    "scheduled_time",
+    "status",
+    "reason",
+    "duration",
+    "notes",
+    "description",
+    "clinical_notes",
+    "service_type",
+    "specialty",
+    "appointment_type",
+    "provider_name",
     "doctor",
     "patient",
     "office",
@@ -98,15 +119,25 @@ with open(SRC, "r", encoding="utf-8-sig", newline="") as f:
         scheduled_time = fmt_scheduled_time(g(row, "start_dt"))
         status = map_status(g(row, "status"))
         status_counts[status] = status_counts.get(status, 0) + 1
+        notes = build_notes(row)
+        service_type = first_present(g(row, "service_type"), g(row, "class_display"))
+        appointment_type = first_present(g(row, "encounter_type"), g(row, "class_display"))
+        reason = first_present(g(row, "service_type"), g(row, "encounter_type"), g(row, "class_display"), g(row, "specialty"))
 
         rows_out.append({
             "source_encounter_id": g(row, "encounter_id"),
             "source_patient_id":   g(row, "rx_patient_id"),
             "scheduled_time":      scheduled_time,
             "status":              status,
-            "reason":              g(row, "service_type"),
+            "reason":              reason,
             "duration":            calc_duration(g(row, "start_dt"), g(row, "end_dt")),
-            "notes":               build_notes(g(row, "encounter_type"), g(row, "specialty")),
+            "notes":               notes,
+            "description":         notes,
+            "clinical_notes":      notes,
+            "service_type":        service_type,
+            "specialty":           g(row, "specialty"),
+            "appointment_type":    appointment_type,
+            "provider_name":       g(row, "practitioner_display"),
             "doctor":              0,
             "patient":             0,
             "office":              0,
@@ -121,7 +152,6 @@ with open(OUT, "w", encoding="utf-8", newline="") as f:
     w.writeheader()
     w.writerows(rows_out)
 
-# ── Summary ──
 print("=" * 64)
 print("ENCOUNTERS -> APPOINTMENTS")
 print("=" * 64)

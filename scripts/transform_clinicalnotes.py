@@ -76,17 +76,23 @@ def parse_vitals(text):
 
 # Column -> human-readable section name, in the order the sections appear.
 SECTION_MAP = [
+    ("note_date",                  "Note Date"),
+    ("practitioner_display",       "Practitioner Display"),
+    ("note_category",              "Note Category"),
     ("chief_complaint",            "Chief Complaint"),
     ("history_of_present_illness", "History of Present Illness"),
     ("review_of_systems",          "Review of Systems"),
+    ("current_medications",        "Current Medications"),
+    ("family_history",             "Family History"),
+    ("social_history",             "Social History"),
     ("physical_exam",              "Physical Exam"),
+    ("diagnostic_reports",         "Diagnostic Reports"),
     ("assessment",                 "Assessment"),
     ("plan",                       "Plan"),
-    ("social_history",             "Social History"),
-    ("family_history",             "Family History"),
-    ("current_medications",        "Current Medications"),
+    ("disposition",                "Disposition"),
+    ("status",                     "Status"),
+    ("laboratory_results",         "Laboratory Results"),
 ]
-
 OUT1_COLUMNS = (["source_note_id", "source_encounter_id", "source_patient_id", "doctor", "appointment",
                  "vital_signs"] + VITAL_COLUMNS)
 OUT2_COLUMNS = ["source_note_id", "source_encounter_id", "section_name", "value"]
@@ -154,3 +160,4 @@ for name, cnt in sorted(skipped_per_section.items(), key=lambda kv: kv[1], rever
     kept = len(base_rows) - cnt
     print(f"   {name:28}: {cnt:2} skipped / {kept:2} kept")
 print("=" * 64)
+

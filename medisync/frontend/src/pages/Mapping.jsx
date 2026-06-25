@@ -76,8 +76,8 @@ const DRCHRONO_ENDPOINTS = {
   documents:            'POST /api/documents (multipart)',
   document_reference:   'POST /api/documents (multipart)',
   document_references:  'POST /api/documents (multipart)',
-  clinical_notes:       'PATCH /api/appointments + POST /api/yellow_notepad',
-  clinical_note:        'PATCH /api/appointments + POST /api/yellow_notepad',
+  clinical_notes:       'PATCH /api/appointments (vitals) + POST /api/clinical_note_field_values',
+  clinical_note:        'PATCH /api/appointments (vitals) + POST /api/clinical_note_field_values',
   coverages:            'POST /api/insurances',
 }
 

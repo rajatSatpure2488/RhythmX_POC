@@ -35,7 +35,7 @@ const DRCHRONO_ENDPOINTS = {
   patient:              'POST /api/patients',
   documents:            'POST /api/documents (multipart)',
   document_reference:   'POST /api/documents (multipart)',
-  clinical_notes:       'PATCH /api/appointments + POST /api/yellow_notepad',
+  clinical_notes:       'PATCH /api/appointments (vitals) + POST /api/clinical_note_field_values',
   coverages:            'POST /api/insurances',
 }
 
@@ -184,8 +184,17 @@ export default function EHRPush() {
 
   const [pushing, setPushing]   = useState(false)
   const [done, setDone]         = useState(false)
+  // Detailed failed-records (file/row/patient context) from the backend LoggingService.
+  const [failedRecords, setFailedRecords] = useState([])
+  const [runId, setRunId]       = useState(null)
   const logRef = useRef(null)
   const { recordCall }          = useApiRate()
+
+  // Backend base for the Excel download link (mirrors the fetch base below).
+  const apiBase = (() => {
+    const rb = (api.defaults && api.defaults.baseURL) || ''
+    return rb === '/' ? '' : rb.replace(/\/$/, '')
+  })()
 
   const selCount  = Object.values(selected).filter(Boolean).length
   const totalSel  = availableKeys.filter(k => selected[k]).reduce(
@@ -204,6 +213,7 @@ export default function EHRPush() {
     if (!selCount) return
     clearPushLog()
     setPushing(true); setDone(false)
+    setFailedRecords([]); setRunId(null)
     let passed = 0, failed = 0
 
     const selectedKeys = availableKeys.filter(k => selected[k])
@@ -312,6 +322,9 @@ export default function EHRPush() {
         failed:         lastSummary?.failed ?? failed,
         already_exists: lastSummary?.already_exists ?? alreadyExists,
       })
+      // Detailed failed records (file/row/patient) from the backend LoggingService.
+      setFailedRecords(lastSummary?.failed_records || [])
+      setRunId(lastSummary?.run_id || null)
 
     } catch (err) {
       const status = err.httpStatus ?? err.response?.status ?? 0
@@ -538,6 +551,57 @@ export default function EHRPush() {
                           </tr>
                         )
                       })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* Failed Records — detailed (file/row/patient context from the backend
+                LoggingService); includes the Excel export. */}
+            {done && failedRecords.length > 0 && (
+              <div className="push-log-fail-table" style={{ marginTop: 12 }}>
+                <div className="vld-debug-table-header">
+                  <span className="vld-debug-table-title">
+                    📄 Failed Records — {failedRecords.length} record{failedRecords.length !== 1 ? 's' : ''}
+                    {runId && (
+                      <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}> · run {runId}</span>
+                    )}
+                  </span>
+                  <a
+                    className="btn btn--ghost btn--sm"
+                    href={`${apiBase}/push/failed-records.xlsx`}
+                    download="failed_records.xlsx"
+                    title="Download all failed records as Excel"
+                  >⬇ Download Excel</a>
+                </div>
+                <div style={{ overflowX: 'auto' }}>
+                  <table className="vld-debug-table">
+                    <thead>
+                      <tr>
+                        <th>FILE</th>
+                        <th>ROW</th>
+                        <th>PATIENT</th>
+                        <th>RESOURCE</th>
+                        <th>ENDPOINT</th>
+                        <th>HTTP</th>
+                        <th>ERROR</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {failedRecords.map((f, i) => (
+                        <tr key={i}>
+                          <td>{f.file_name || '—'}</td>
+                          <td className="vld-record-id">{f.row}</td>
+                          <td>{f.source_patient_id || '—'}</td>
+                          <td>{TAB_LABELS[f.resource_type] || f.resource_type}</td>
+                          <td style={{ fontFamily: 'monospace', fontSize: '0.72rem' }}>{f.endpoint}</td>
+                          <td><span className="err-tag err-tag--null">{f.status_code}</span></td>
+                          <td className="vld-debug-detail" style={{ maxWidth: 280, wordBreak: 'break-word' }}>
+                            {f.error_reason}
+                          </td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                 </div>

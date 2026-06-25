@@ -41,7 +41,7 @@ const DRCHRONO_ENDPOINTS = {
   documents:            { method:'POST',  path:'/api/documents',                   note:'Multipart file upload (PDF, JPG, etc.)' },
   document_reference:   { method:'POST',  path:'/api/documents',                   note:'Multipart file upload from FHIR DocumentReference' },
   document_references:  { method:'POST',  path:'/api/documents',                   note:'Multipart file upload from FHIR DocumentReference' },
-  clinical_notes:       { method:'POST',  path:'/api/yellow_notepad',              note:'Vitals -> PATCH /api/appointments, then note -> yellow_notepad (template 7520906)' },
+  clinical_notes:       { method:'POST',  path:'/api/clinical_note_field_values',   note:'Vitals -> PATCH /api/appointments, then note sections -> clinical_note_field_values' },
   coverages:            { method:'POST',  path:'/api/insurances',                    note:'Insurance type primary/secondary' },
   appointments:         { method:'POST',  path:'/api/appointments',                 note:'Requires doctor_id' },
   diagnostic_reports:   { method:'POST',  path:'/api/documents',                   note:'Binary upload supported' },
