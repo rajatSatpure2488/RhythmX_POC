@@ -1,81 +1,85 @@
-"""
-MediSync — config.py
-Loads environment variables at module-import time.
-Includes detailed trace logging so we can confirm exactly which .env is loaded
-and which values are present at runtime.
-"""
+"""Application configuration loaded from environment variables."""
+from __future__ import annotations
 
-import os
 import logging
+import os
 from pathlib import Path
+
 from dotenv import load_dotenv
 
-# ── Setup basic logging early (before our logger module) ──
+
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
-_log = logging.getLogger("medisync.config")
+log = logging.getLogger("medisync.config")
 
-# ── Resolve .env path ──────────────────────────────────────
-# config.py lives at: backend/app/core/config.py
-# parents[2] = backend  (host) / /app (container, since Dockerfile WORKDIR=/app
-# and `COPY . .` copies backend/ contents — including .env — into /app)
-_THIS_FILE = Path(__file__).resolve()
-_ROOT      = _THIS_FILE.parents[2]
-_ENV_PATH  = _ROOT / ".env"
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_ENV_PATH = BACKEND_ROOT.parent / ".env"
+ENV_PATH = Path(os.getenv("MEDISYNC_ENV_PATH", DEFAULT_ENV_PATH)).expanduser()
 
-_log.debug(f"[config] __file__     = {_THIS_FILE}")
-_log.debug(f"[config] project root = {_ROOT}")
-_log.debug(f"[config] .env path    = {_ENV_PATH}")
-_log.debug(f"[config] .env exists  = {_ENV_PATH.exists()}")
+load_dotenv(dotenv_path=ENV_PATH, override=True)
 
-# ── Load .env ──────────────────────────────────────────────
-_loaded = load_dotenv(dotenv_path=_ENV_PATH, override=True)
-_log.debug(f"[config] load_dotenv() returned: {_loaded}")
 
-# ── Read values ────────────────────────────────────────────
-DRCHRONO_CLIENT_ID:     str = os.getenv("DRCHRONO_CLIENT_ID", "")
-DRCHRONO_CLIENT_SECRET: str = os.getenv("DRCHRONO_CLIENT_SECRET", "")
-DRCHRONO_REDIRECT_URI:  str = os.getenv("DRCHRONO_REDIRECT_URI", "http://localhost:8501")
+def env_str(name: str, default: str = "") -> str:
+    return os.getenv(name, default)
 
-# ── API Version — v4 = "Hunt Valley" ───────────────────────
-# Sent as the X-DRC-API-Version header on every DrChrono API call.
-DRCHRONO_API_VERSION:   str = os.getenv("DRCHRONO_API_VERSION", "v4")
 
-FRONTEND_URL:   str = os.getenv("FRONTEND_URL",  "http://localhost:8501")
-BACKEND_HOST:   str = os.getenv("BACKEND_HOST",  "0.0.0.0")
-BACKEND_PORT:   int = int(os.getenv("BACKEND_PORT", "8000"))
+def env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        log.warning("Invalid integer for %s=%r. Using default %s.", name, raw, default)
+        return default
 
-DRCHRONO_DAILY_LIMIT:  int = int(os.getenv("DRCHRONO_DAILY_LIMIT",  "500"))
-DRCHRONO_MINUTE_LIMIT: int = int(os.getenv("DRCHRONO_MINUTE_LIMIT", "29"))
 
-# ── DrChrono static URLs ────────────────────────────────────
-# OAuth endpoints live on drchrono.com; REST API lives on app.drchrono.com
-DRCHRONO_AUTH_URL:  str = "https://app.drchrono.com/o/authorize/"
-DRCHRONO_TOKEN_URL: str = "https://app.drchrono.com/o/token/"
-DRCHRONO_API_BASE:  str = "https://app.drchrono.com/api/"
+DRCHRONO_CLIENT_ID = env_str("DRCHRONO_CLIENT_ID")
+DRCHRONO_CLIENT_SECRET = env_str("DRCHRONO_CLIENT_SECRET")
+DRCHRONO_REDIRECT_URI = env_str("DRCHRONO_REDIRECT_URI", "http://localhost:8501")
+DRCHRONO_API_VERSION = env_str("DRCHRONO_API_VERSION", "v4")
 
-# ── Trace log each value (sanitized) ──────────────────────
-_log.info(f"[config] DRCHRONO_CLIENT_ID     = {'SET (' + DRCHRONO_CLIENT_ID[:8] + '...)' if DRCHRONO_CLIENT_ID else 'NOT SET ❌'}")
-_log.info(f"[config] DRCHRONO_CLIENT_SECRET = {'SET (hidden)' if DRCHRONO_CLIENT_SECRET else 'NOT SET ❌'}")
-_log.info(f"[config] DRCHRONO_REDIRECT_URI  = {DRCHRONO_REDIRECT_URI}")
-_log.info(f"[config] DRCHRONO_API_VERSION   = {DRCHRONO_API_VERSION}")
-_log.info(f"[config] FRONTEND_URL           = {FRONTEND_URL}")
-_log.info(f"[config] BACKEND_PORT           = {BACKEND_PORT}")
+FRONTEND_URL = env_str("FRONTEND_URL", "http://localhost:8501")
+BACKEND_HOST = env_str("BACKEND_HOST", "0.0.0.0")
+BACKEND_PORT = env_int("BACKEND_PORT", 8000)
+
+DRCHRONO_DAILY_LIMIT = env_int("DRCHRONO_DAILY_LIMIT", 500)
+DRCHRONO_MINUTE_LIMIT = env_int("DRCHRONO_MINUTE_LIMIT", 29)
+
+DRCHRONO_AUTH_URL = env_str("DRCHRONO_AUTH_URL", "https://app.drchrono.com/o/authorize/")
+DRCHRONO_TOKEN_URL = env_str("DRCHRONO_TOKEN_URL", "https://app.drchrono.com/o/token/")
+DRCHRONO_API_BASE = env_str("DRCHRONO_API_BASE", "https://app.drchrono.com/api/")
+
+
+def _masked(value: str) -> str:
+    return f"SET ({value[:8]}...)" if value else "NOT SET"
+
+
+log.info("Loaded config from %s (exists=%s)", ENV_PATH, ENV_PATH.exists())
+log.info("DRCHRONO_CLIENT_ID=%s", _masked(DRCHRONO_CLIENT_ID))
+log.info("DRCHRONO_CLIENT_SECRET=%s", "SET (hidden)" if DRCHRONO_CLIENT_SECRET else "NOT SET")
+log.info("DRCHRONO_REDIRECT_URI=%s", DRCHRONO_REDIRECT_URI)
+log.info("DRCHRONO_API_VERSION=%s", DRCHRONO_API_VERSION)
+log.info("FRONTEND_URL=%s", FRONTEND_URL)
+log.info("BACKEND_PORT=%s", BACKEND_PORT)
 
 
 def validate() -> None:
-    """Fail fast if required credentials are missing."""
-    missing = []
-    if not DRCHRONO_CLIENT_ID:     missing.append("DRCHRONO_CLIENT_ID")
-    if not DRCHRONO_CLIENT_SECRET: missing.append("DRCHRONO_CLIENT_SECRET")
+    """Raise if required DrChrono OAuth credentials are missing."""
+    missing = [
+        name
+        for name, value in {
+            "DRCHRONO_CLIENT_ID": DRCHRONO_CLIENT_ID,
+            "DRCHRONO_CLIENT_SECRET": DRCHRONO_CLIENT_SECRET,
+        }.items()
+        if not value
+    ]
     if missing:
-        _log.critical(f"[config] MISSING required vars: {missing}")
-        _log.critical(f"[config] Checked .env at: {_ENV_PATH}")
         raise EnvironmentError(
             f"Missing required environment variables: {', '.join(missing)}\n"
-            f"Expected .env at: {_ENV_PATH}"
+            f"Expected .env at: {ENV_PATH}"
         )
-    _log.info("[config] validate() PASSED ✓")
+    log.info("Config validation passed.")
