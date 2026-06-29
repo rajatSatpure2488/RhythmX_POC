@@ -1,0 +1,704 @@
+[
+  {
+    "category_name": "patient",
+    "resource_type": "Patient",
+    "category_api": "patients",
+    "method": "POST",
+    "required_fields": [
+      "first_name",
+      "last_name",
+      "date_of_birth",
+      "gender",
+      "doctor"
+    ],
+    "payload": {
+      "first_name": "name[use=official].given[0] || name[0].given[0]",
+      "last_name": "name[use=official].family || name[0].family",
+      "date_of_birth": "date(birthDate)",
+      "gender": "map(gender, gender_map) || capitalize(gender)",
+      "doctor": "context.doctor_id",
+      "email": "telecom[system=email].value",
+      "home_phone": "telecom[system=phone and use!=mobile].value",
+      "cell_phone": "telecom[system=phone and use=mobile].value",
+      "address": "join(address[use=home].line || address[0].line, ', ')",
+      "city": "address[use=home].city || address[0].city",
+      "state": "address[use=home].state || address[0].state",
+      "zip_code": "address[use=home].postalCode || address[0].postalCode"
+    },
+    "lookup_maps": {
+      "gender_map": {
+        "male": "Male",
+        "female": "Female",
+        "other": "Other",
+        "unknown": "UNK"
+      }
+    }
+  },
+  {
+    "category_name": "get_patients",
+    "resource_type": null,
+    "category_api": "patients",
+    "method": "GET",
+    "required_fields": [],
+    "payload": {}
+  },
+  {
+    "category_name": "appointment",
+    "resource_type": "Appointment",
+    "category_api": "appointments",
+    "method": "POST",
+    "required_fields": [
+      "doctor",
+      "office",
+      "exam_room",
+      "patient",
+      "scheduled_time"
+    ],
+    "payload": {
+      "doctor": "context.doctor_id",
+      "office": "context.office_id",
+      "exam_room": "context.exam_room || 1",
+      "patient": "context.patient_id || ref(participant.actor.reference, Patient/)",
+      "scheduled_time": "start",
+      "duration": "minutesDuration || 30",
+      "reason": "description",
+      "status": "map(status, status_map) || 'Not Confirmed'",
+      "notes": "comment"
+    },
+    "lookup_maps": {
+      "status_map": {
+        "booked": "Not Confirmed",
+        "arrived": "Arrived",
+        "checked-in": "Checked In",
+        "fulfilled": "Complete",
+        "cancelled": "Cancelled",
+        "proposed": "Not Confirmed"
+      }
+    }
+  },
+  {
+    "category_name": "get_appointments",
+    "resource_type": null,
+    "category_api": "appointments",
+    "method": "GET",
+    "required_fields": [],
+    "payload": {}
+  },
+  {
+    "category_name": "medication",
+    "resource_type": "MedicationRequest",
+    "category_api": "medications",
+    "method": "POST",
+    "required_fields": [
+      "doctor",
+      "patient",
+      "appointment",
+      "name"
+    ],
+    "payload": {
+      "doctor": "context.doctor_id",
+      "patient": "context.patient_id || referenceId(subject)",
+      "appointment": "context.appointment_id || referenceId(encounter)",
+      "date_prescribed": "date(authoredOn)",
+      "name": "coding(medicationCodeableConcept, http://www.nlm.nih.gov/research/umls/rxnorm, display) || medicationCodeableConcept.coding[0].display || medicationCodeableConcept.text",
+      "rxnorm": "coding(medicationCodeableConcept, http://www.nlm.nih.gov/research/umls/rxnorm, code) || medicationCodeableConcept.coding[0].code",
+      "dosage_quantity": "str(dosageInstruction[0].doseAndRate[0].doseQuantity.value)",
+      "dosage_units": "dosageInstruction[0].doseAndRate[0].doseQuantity.unit",
+      "dose_quantity": "str(dosageInstruction[0].doseAndRate[0].doseQuantity.value)",
+      "dose_unit": "dosageInstruction[0].doseAndRate[0].doseQuantity.unit",
+      "route": "dosageInstruction[0].route.coding[0].display",
+      "frequency": "dosageInstruction[0].text",
+      "indication": "reason[0].concept.text",
+      "status": "status || 'active'",
+      "order_status": "intent",
+      "number_refills": "dispenseRequest.numberOfRepeatsAllowed",
+      "dispense_quantity": "str(dispenseRequest.quantity.value)",
+      "prn": "dosageInstruction[0].asNeededBoolean",
+      "start_date": "date(authoredOn)",
+      "notes": "note[0].text"
+    }
+  },
+  {
+    "category_name": "get_medications",
+    "resource_type": null,
+    "category_api": "medications",
+    "method": "GET",
+    "required_fields": [],
+    "payload": {}
+  },
+  {
+    "category_name": "allergy",
+    "resource_type": "AllergyIntolerance",
+    "category_api": "allergies",
+    "method": "POST",
+    "required_fields": [
+      "patient",
+      "doctor",
+      "allergen"
+    ],
+    "payload": {
+      "patient": "context.patient_id || referenceId(patient)",
+      "doctor": "context.doctor_id",
+      "allergen": "code.coding[0].display || code.text",
+      "status": "map(clinicalStatus.coding[0].code, status_map) || 'inactive'",
+      "severity": "reaction[0].severity || map(criticality, severity_map)",
+      "reaction": "reaction[0].manifestation[0].coding[0].display",
+      "allergy_type": "category[0]",
+      "notes": "note[0].text"
+    },
+    "lookup_maps": {
+      "status_map": {
+        "active": "active"
+      },
+      "severity_map": {
+        "high": "severe",
+        "low": "mild",
+        "unable-to-assess": "moderate"
+      }
+    }
+  },
+  {
+    "category_name": "get_allergies",
+    "resource_type": null,
+    "category_api": "allergies",
+    "method": "GET",
+    "required_fields": [],
+    "payload": {}
+  },
+  {
+    "category_name": "problem",
+    "resource_type": null,
+    "category_api": "problems",
+    "method": "POST",
+    "required_fields": [],
+    "payload": {}
+  },
+  {
+    "category_name": "get_problems",
+    "resource_type": null,
+    "category_api": "problems",
+    "method": "GET",
+    "required_fields": [],
+    "payload": {}
+  },
+  {
+    "category_name": "condition",
+    "resource_type": "Condition",
+    "category_api": "problems",
+    "method": "POST",
+    "required_fields": [
+      "patient",
+      "doctor",
+      "icd_code"
+    ],
+    "payload": {
+      "patient": "context.patient_id || referenceId(subject)",
+      "doctor": "context.doctor_id",
+      "icd_code": "coding(code, http://hl7.org/fhir/sid/icd-10, code) || coding(code, http://hl7.org/fhir/sid/icd-10-cm, code) || code.coding[0].code",
+      "name": "coding(code, http://hl7.org/fhir/sid/icd-10, display) || coding(code, http://hl7.org/fhir/sid/icd-10-cm, display) || code.coding[0].display || code.text",
+      "status": "map(clinicalStatus.coding[0].code, status_map) || 'active'",
+      "date_diagnosis": "date(onsetDateTime)",
+      "notes": "note[0].text"
+    },
+    "lookup_maps": {
+      "status_map": {
+        "active": "active",
+        "inactive": "inactive",
+        "resolved": "resolved"
+      }
+    }
+  },
+  {
+    "category_name": "clinical_note_field_value",
+    "resource_type": null,
+    "category_api": "clinical_note_field_values",
+    "method": "POST",
+    "required_fields": [],
+    "payload": {}
+  },
+  {
+    "category_name": "physical_exam",
+    "resource_type": null,
+    "category_api": "patient_physical_exams",
+    "method": "POST",
+    "required_fields": [],
+    "payload": {}
+  },
+  {
+    "category_name": "document",
+    "resource_type": null,
+    "category_api": "documents",
+    "method": "POST",
+    "required_fields": [],
+    "payload": {}
+  },
+  {
+    "category_name": "get_documents",
+    "resource_type": null,
+    "category_api": "documents",
+    "method": "GET",
+    "required_fields": [],
+    "payload": {}
+  },
+  {
+    "category_name": "eligibility_check",
+    "resource_type": null,
+    "category_api": "eligibility_checks",
+    "method": "POST",
+    "required_fields": [],
+    "payload": {}
+  },
+  {
+    "category_name": "patient_insurance",
+    "resource_type": null,
+    "category_api": "patient_insurances",
+    "method": "POST",
+    "required_fields": [],
+    "payload": {}
+  },
+  {
+    "category_name": "task",
+    "resource_type": null,
+    "category_api": "tasks",
+    "method": "POST",
+    "required_fields": [],
+    "payload": {}
+  },
+  {
+    "category_name": "get_tasks",
+    "resource_type": null,
+    "category_api": "tasks",
+    "method": "GET",
+    "required_fields": [],
+    "payload": {}
+  },
+  {
+    "category_name": "immunization",
+    "resource_type": "Immunization",
+    "category_api": "patient_vaccine_records",
+    "method": "POST",
+    "required_fields": [
+      "patient",
+      "vaccine_inventory",
+      "doctor"
+    ],
+    "payload": {
+      "patient": "context.patient_id || referenceId(patient)",
+      "vaccine_inventory": "context.vaccine_inventory_id",
+      "doctor": "context.doctor_id",
+      "administration_date": "date(occurrenceDateTime)",
+      "lot_number": "lotNumber",
+      "administered_by": "context.administered_by || referenceId(performer[0].actor)",
+      "site": "site.coding[0].display",
+      "route": "route.coding[0].display",
+      "vaccine_name": "coding(vaccineCode, http://hl7.org/fhir/sid/cvx, display) || vaccineCode.coding[0].display"
+    },
+    "warnings": [
+      {
+        "when": "missing(vaccine_inventory)",
+        "message": "vaccine_inventory not set - call GET /api/inventory_vaccines first"
+      }
+    ]
+  },
+  {
+    "category_name": "vaccine",
+    "resource_type": null,
+    "category_api": "vaccines",
+    "method": "POST",
+    "required_fields": [],
+    "payload": {}
+  },
+  {
+    "category_name": "encounter_amendment",
+    "resource_type": null,
+    "category_api": "amendments",
+    "method": "POST",
+    "required_fields": [],
+    "payload": {}
+  },
+  {
+    "category_name": "lab_order",
+    "resource_type": null,
+    "category_api": "lab_orders",
+    "method": "POST",
+    "required_fields": [],
+    "payload": {}
+  },
+  {
+    "category_name": "lab_result",
+    "resource_type": null,
+    "category_api": "lab_results",
+    "method": "POST",
+    "required_fields": [],
+    "payload": {}
+  },
+  {
+    "category_name": "get_lab_results",
+    "resource_type": null,
+    "category_api": "lab_results",
+    "method": "GET",
+    "required_fields": [],
+    "payload": {}
+  },
+  {
+    "category_name": "procedure",
+    "resource_type": "Procedure",
+    "category_api": "procedures",
+    "method": "POST",
+    "required_fields": [
+      "patient",
+      "appointment"
+    ],
+    "payload": {
+      "patient": "context.patient_id || referenceId(subject)",
+      "appointment": "context.appointment_id",
+      "procedure_code": "coding(code, http://www.ama-assn.org/go/cpt, code) || code.coding[0].code",
+      "name": "coding(code, http://www.ama-assn.org/go/cpt, display) || code.coding[0].display || code.text",
+      "description": "outcome.coding[0].display || note[0].text",
+      "date": "date(performedDateTime) || date(performedPeriod.start)"
+    }
+  },
+  {
+    "category_name": "procedure_section_field_value",
+    "resource_type": null,
+    "category_api": "clinical_note_section_field_values",
+    "method": "POST",
+    "required_fields": [],
+    "payload": {}
+  },
+  {
+    "category_name": "careplan",
+    "resource_type": "CarePlan",
+    "category_api": "care_plans",
+    "method": "POST",
+    "required_fields": [
+      "patient",
+      "doctor"
+    ],
+    "payload": {
+      "patient": "context.patient_id || referenceId(subject)",
+      "doctor": "context.doctor_id",
+      "name": "title",
+      "start_date": "date(period.start)",
+      "end_date": "date(period.end)",
+      "status": "map(status, status_map) || 'active'"
+    },
+    "lookup_maps": {
+      "status_map": {
+        "active": "active",
+        "completed": "completed",
+        "revoked": "cancelled",
+        "on-hold": "active"
+      }
+    }
+  },
+  {
+    "category_name": "get_careplans",
+    "resource_type": null,
+    "category_api": "care_plans",
+    "method": "GET",
+    "required_fields": [],
+    "payload": {}
+  },
+  {
+    "category_name": "care_plan",
+    "resource_type": null,
+    "category_api": "care_plans",
+    "method": "POST",
+    "required_fields": [],
+    "payload": {}
+  },
+  {
+    "category_name": "care_team",
+    "resource_type": null,
+    "category_api": "patient_communications",
+    "method": "POST",
+    "required_fields": [],
+    "payload": {}
+  },
+  {
+    "category_name": "patient_communication",
+    "resource_type": null,
+    "category_api": "patient_communications",
+    "method": "POST",
+    "required_fields": [],
+    "payload": {}
+  },
+  {
+    "category_name": "get_doctors",
+    "resource_type": null,
+    "category_api": "doctors",
+    "method": "GET",
+    "required_fields": [],
+    "payload": {}
+  },
+  {
+    "category_name": "get_current_user",
+    "resource_type": null,
+    "category_api": "users/current",
+    "method": "GET",
+    "required_fields": [],
+    "payload": {}
+  },
+  {
+    "category_name": "get_offices",
+    "resource_type": null,
+    "category_api": "offices",
+    "method": "GET",
+    "required_fields": [],
+    "payload": {}
+  },
+  {
+    "category_name": "encounter",
+    "required_fields": [
+      "doctor",
+      "office",
+      "exam_room",
+      "patient",
+      "scheduled_time"
+    ],
+    "payload": {
+      "doctor": "context.doctor_id",
+      "office": "context.office_id",
+      "exam_room": "context.exam_room || 1",
+      "patient": "context.patient_id || referenceId(subject)",
+      "scheduled_time": "actualPeriod.start || period.start",
+      "duration": "minutesBetween(actualPeriod.start || period.start, actualPeriod.end || period.end) || 30",
+      "reason": "type[0].coding[0].display || reason[0].value[0].coding[0].display",
+      "status": "map(status, status_map) || 'Not Confirmed'"
+    },
+    "lookup_maps": {
+      "status_map": {
+        "planned": "Not Confirmed",
+        "in-progress": "Arrived",
+        "completed": "Complete",
+        "cancelled": "Cancelled"
+      }
+    },
+    "resource_type": "Encounter",
+    "category_api": "appointments",
+    "method": "POST"
+  },
+  {
+    "category_name": "observation",
+    "required_fields": [
+      "patient",
+      "appointment"
+    ],
+    "payload": {
+      "patient": "context.patient_id || referenceId(subject)",
+      "appointment": "context.appointment_id",
+      "data": "object(map(code.coding[system=http://loinc.org].code, vital_map) || code.coding[0].display || code.coding[0].code || 'observation', valueQuantity.value || valueString)"
+    },
+    "lookup_maps": {
+      "vital_map": {
+        "8302-2": "height",
+        "29463-7": "weight",
+        "8480-6": "blood_pressure_1",
+        "8462-4": "blood_pressure_2",
+        "8867-4": "pulse",
+        "8310-5": "temperature",
+        "9279-1": "respiratory_rate",
+        "2708-6": "oxygen_saturation",
+        "39156-5": "bmi"
+      }
+    },
+    "warnings": [
+      {
+        "when": "missing(appointment)",
+        "message": "appointment not set - pass context.appointment_id"
+      }
+    ],
+    "resource_type": "Observation",
+    "category_api": "patient_physical_exams",
+    "method": "POST"
+  },
+  {
+    "category_name": "observation_note",
+    "required_fields": [
+      "appointment",
+      "field_type",
+      "value"
+    ],
+    "payload": {
+      "appointment": "context.appointment_id",
+      "field_type": "context.field_type_id",
+      "value": "concat(code.coding[0].display, ': ', valueString || valueQuantity.value)"
+    },
+    "warnings": [
+      {
+        "when": "missing(field_type)",
+        "message": "field_type not set - call GET /api/clinical_note_field_types first"
+      }
+    ],
+    "resource_type": "ObservationNote",
+    "category_api": "clinical_note_field_values",
+    "method": "POST"
+  },
+  {
+    "category_name": "document_reference",
+    "required_fields": [
+      "patient",
+      "doctor"
+    ],
+    "payload": {
+      "patient": "context.patient_id || referenceId(subject)",
+      "doctor": "context.doctor_id",
+      "description": "type.coding[0].display || type.text || description",
+      "date": "date(date)",
+      "document_url": "content[0].attachment.url"
+    },
+    "warnings": [
+      {
+        "when": "missing(document_url)",
+        "message": "No document URL/file - DrChrono requires multipart/form-data file upload"
+      }
+    ],
+    "resource_type": "DocumentReference",
+    "category_api": "documents",
+    "method": "POST"
+  },
+  {
+    "category_name": "clinical_note",
+    "required_fields": [
+      "appointment",
+      "field_type",
+      "value"
+    ],
+    "payload": {
+      "appointment": "context.appointment_id",
+      "field_type": "context.field_type_id",
+      "value": "base64(content[0].attachment.data) || concat('[Document URL: ', content[0].attachment.url, ']')",
+      "_section_hint": "map(type.coding[system=http://loinc.org].code, loinc_sections) || type.coding[0].display || 'Clinical Note'"
+    },
+    "lookup_maps": {
+      "loinc_sections": {
+        "11506-3": "Chief Complaint",
+        "34117-2": "History & Physical",
+        "34133-9": "Discharge Summary",
+        "18748-4": "Imaging Results",
+        "11488-4": "Consultation Note"
+      }
+    },
+    "warnings": [
+      {
+        "when": "missing(field_type)",
+        "message": "field_type not set - call GET /api/clinical_note_field_types first"
+      }
+    ],
+    "resource_type": "ClinicalNote",
+    "category_api": "clinical_note_field_values",
+    "method": "POST"
+  },
+  {
+    "category_name": "coverage",
+    "required_fields": [
+      "appointment"
+    ],
+    "payload": {
+      "patient": "context.patient_id || referenceId(beneficiary)",
+      "appointment": "context.appointment_id",
+      "insurance_plan": "payor[0].display || referenceId(payor[0])",
+      "member_id": "subscriberId",
+      "period_start": "period.start",
+      "period_end": "period.end"
+    },
+    "warnings": [
+      {
+        "when": "missing(insurance_plan)",
+        "message": "No payor name found - insurance plan may not match DrChrono records"
+      }
+    ],
+    "resource_type": "Coverage",
+    "category_api": "eligibility_checks",
+    "method": "POST"
+  },
+  {
+    "category_name": "service_request",
+    "required_fields": [
+      "title",
+      "category"
+    ],
+    "payload": {
+      "title": "code.coding[0].display || code.text || 'Service Request'",
+      "category": "context.task_category_id || 1",
+      "patient": "context.patient_id || referenceId(subject)",
+      "assignee_user": "context.assignee_user_id",
+      "status": "map(status, status_map) || 'Open'",
+      "due_date": "date(occurrenceDateTime)",
+      "notes": "note[0].text"
+    },
+    "lookup_maps": {
+      "status_map": {
+        "active": "Open",
+        "completed": "Closed",
+        "revoked": "Closed"
+      }
+    },
+    "resource_type": "ServiceRequest",
+    "category_api": "tasks",
+    "method": "POST"
+  },
+  {
+    "category_name": "diagnostic_report",
+    "required_fields": [
+      "patient",
+      "doctor",
+      "sublab"
+    ],
+    "payload": {
+      "patient": "context.patient_id || referenceId(subject)",
+      "doctor": "context.doctor_id",
+      "sublab": "context.sublab_id",
+      "icd10_codes": "code.coding[0].code",
+      "clinical_information": "conclusion || code.coding[0].display"
+    },
+    "warnings": [
+      {
+        "when": "missing(sublab)",
+        "message": "sublab not set - call GET /api/sublabs first"
+      }
+    ],
+    "resource_type": "DiagnosticReport",
+    "category_api": "lab_orders",
+    "method": "POST"
+  },
+  {
+    "category_name": "practitioner",
+    "required_fields": [],
+    "read_only": true,
+    "payload": {
+      "first_name": "name[0].given[0]",
+      "last_name": "name[0].family",
+      "npi": "identifier[system contains us-npi].value",
+      "specialty": "qualification[0].code.coding[0].display",
+      "_read_only": true
+    },
+    "warnings": [
+      {
+        "when": "always",
+        "message": "Practitioners are READ-ONLY in DrChrono - use GET /api/doctors to look up"
+      }
+    ],
+    "resource_type": "Practitioner",
+    "category_api": "doctors",
+    "method": "GET"
+  },
+  {
+    "category_name": "careteam",
+    "required_fields": [
+      "patient",
+      "doctor"
+    ],
+    "payload": {
+      "patient": "context.patient_id || referenceId(subject)",
+      "doctor": "context.doctor_id",
+      "type": "'other'",
+      "description": "concat('Care Team: ', name)",
+      "date": "date(period.start)"
+    },
+    "resource_type": "CareTeam",
+    "category_api": "patient_communications",
+    "method": "POST"
+  }
+]

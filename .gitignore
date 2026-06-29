@@ -14,6 +14,10 @@ docs/
 .env.development.local
 .env.test.local
 .env.production.local
+dr_chrono/static/token.json
+dr_chrono/uploads/*.json
+dr_chrono/uploads/*.csv
+dr_chrono/backend/.env
 
 # Frontend (Node.js)
 node_modules/
