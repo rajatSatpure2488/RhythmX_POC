@@ -1,0 +1,5 @@
+logs/*.log
+logs/*.zip
+static/token.json
+__pycache__/
+core/__pycache__/

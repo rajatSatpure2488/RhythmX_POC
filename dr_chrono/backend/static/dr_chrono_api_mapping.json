@@ -700,5 +700,25 @@
     "resource_type": "CareTeam",
     "category_api": "patient_communications",
     "method": "POST"
+  },
+  {
+    "category_name": "organization",
+    "required_fields": [],
+    "read_only": true,
+    "payload": {
+      "name": "name",
+      "npi": "identifier[system contains us-npi].value",
+      "type": "type[0].coding[0].display",
+      "_read_only": true
+    },
+    "warnings": [
+      {
+        "when": "always",
+        "message": "Organizations are READ-ONLY/not implemented for DrChrono POST in this mapper"
+      }
+    ],
+    "resource_type": "Organization",
+    "category_api": "offices",
+    "method": "GET"
   }
 ]

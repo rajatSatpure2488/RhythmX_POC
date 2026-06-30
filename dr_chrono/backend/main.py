@@ -1,9 +1,21 @@
 # Set up FastAPI
+from pathlib import Path
+
 from fastapi import FastAPI
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
+from dr_chrono.backend.core.logging_config import setup_logging
+
+setup_logging()
 
 from backend.router import router as drchrono_router
+
+
+BASE_DIR = Path(__file__).resolve().parents[1]
+FRONTEND_DIST = BASE_DIR / "frontend" / "dist"
+FRONTEND_INDEX = FRONTEND_DIST / "index.html"
 
 
 app = FastAPI(
@@ -26,6 +38,27 @@ app.add_middleware(
 
 # Router for upload APIs
 app.include_router(drchrono_router, tags=["EHR"])
+
+if (FRONTEND_DIST / "assets").exists():
+    app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="frontend-assets")
+
+
+@app.get("/", include_in_schema=False)
+async def frontend_app():
+    if FRONTEND_INDEX.exists():
+        return FileResponse(FRONTEND_INDEX)
+
+    return HTMLResponse(
+        """
+        <html>
+          <body style="font-family: sans-serif; padding: 32px;">
+            <h1>DrChrono frontend is not built yet.</h1>
+            <p>Run <code>cd dr_chrono/frontend && npm run build</code>, then restart the backend.</p>
+          </body>
+        </html>
+        """,
+        status_code=200,
+    )
 
 
 if __name__ == "__main__":

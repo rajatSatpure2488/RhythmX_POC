@@ -12,6 +12,7 @@ Available endpoints:
 """
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
+from loguru import logger
 from backend.centralized_mapper import EHRDynamicApiHandler
 
 from backend.upload import UploadService
@@ -21,35 +22,25 @@ router = APIRouter()
 upload_service = UploadService()
 dynamic_api_handler = EHRDynamicApiHandler()
 
-# @router.post("/load")
-# async def upload_load(files: list[UploadFile] = File(...)):
-#     """
-#     Upload and load multiple files.
+@router.post("/load")
+async def upload_load(files: list[UploadFile] = File(...)):
+    """
+    Upload and load multiple files.
 
-#     This endpoint replaces the existing upload session with the newly uploaded
-#     files. It supports CSV, JSON, and ZIP files.
+    This endpoint replaces the existing upload session with the newly uploaded
+    files. It supports CSV, JSON, and ZIP files.
+    """
+    try:
+        file_payloads = []
 
-#     Args:
-#         files: List of uploaded files.
+        for file in files:
+            content = await file.read()
+            file_payloads.append((file.filename or "upload.csv", content))
 
-#     Returns:
-#         Upload summary including total records, resource types,
-#         patient information, parsed resources, and detection details.
+        return upload_service.load_files(file_payloads)
 
-#     Raises:
-#         HTTPException: If no files are provided.
-#     """
-#     try:
-#         file_payloads = []
-
-#         for file in files:
-#             content = await file.read()
-#             file_payloads.append((file.filename or "upload.csv", content))
-
-#         return upload_service.load_files(file_payloads)
-
-#     except ValueError as exc:
-#         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/load-single")
@@ -91,6 +82,27 @@ async def upload_status():
         resource types, and detection summary.
     """
     return upload_service.status()
+
+
+@router.get("/logs/api")
+async def api_log_status(window_seconds: int = 60, rate_limit: int = 29):
+    """
+    Compatibility endpoint for frontend API monitor polling.
+
+    The standalone DrChrono backend does not keep the MediSync log buffer, so
+    this returns a simple healthy rate snapshot instead of a 404.
+    """
+    logger.debug(
+        "Frontend API monitor status requested. window_seconds={} rate_limit={}",
+        window_seconds,
+        rate_limit,
+    )
+    return {
+        "used": 0,
+        "rate_limit": rate_limit,
+        "window_seconds": window_seconds,
+        "remaining": rate_limit,
+    }
 
 
 @router.post("/call-uploaded-file")
