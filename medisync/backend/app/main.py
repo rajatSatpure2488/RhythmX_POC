@@ -106,3 +106,13 @@ async def health_check():
         "version":       "1.0.0",
         "ehr_connected": bool(config.DRCHRONO_CLIENT_ID),
     }
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(
+        "app.main:app",
+        host=config.BACKEND_HOST,
+        port=config.BACKEND_PORT,
+        reload=True,
+        log_level="info",
+    )
