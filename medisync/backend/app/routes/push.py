@@ -1118,7 +1118,9 @@ def _codeable_code(value: Any) -> str:
 
 
 def _active_status(value: Any, default: str = "active") -> str:
-    raw = str(value or default).lower()
+    if isinstance(value, dict):
+        value = _codeable_code(value) or _codeable_text(value)
+    raw = str(value or default).strip().lower()
     if raw in ("active", "completed", "intended", "confirmed", "final"):
         return "active"
     return "inactive"
@@ -2304,11 +2306,25 @@ def _code_system_display(value: Any) -> str:
     raw = str(value or "").strip()
     if not raw or raw.lower() == "uncoded":
         return ""
+    if raw == "http://snomed.info/sct":
+        return "SNOMED CT"
+    if raw == "http://www.nlm.nih.gov/research/umls/rxnorm":
+        return "RxNorm"
     key = re.sub(r"[\s\-_]", "", raw).upper()
     return {
         "SNOMEDCT": "SNOMED CT", "SNOMED": "SNOMED CT", "RXNORM": "RxNorm",
         "ICD10CM": "ICD-10-CM", "ICD10": "ICD-10", "ICD9CM": "ICD-9-CM", "LOINC": "LOINC",
     }.get(key, raw)
+
+
+def _codeable_system(value: Any) -> str:
+    if isinstance(value, dict):
+        coding = value.get("coding") or []
+        if isinstance(coding, list) and coding:
+            first = coding[0]
+            if isinstance(first, dict):
+                return str(first.get("system") or "").strip()
+    return ""
 
 
 def _compose_allergy_notes(record: dict, description: str, reaction: Any) -> str:
@@ -2356,7 +2372,9 @@ def _compose_allergy_notes(record: dict, description: str, reaction: Any) -> str
     code = _codeable_code(raw_code) if isinstance(raw_code, dict) else str(raw_code or "").strip()
     if code and code.lower() != "uncoded":
         lines.append(f"Code: {code}")
-        code_system = _code_system_display(_first_present(record, "code_vocab", "code_system"))
+        code_system = _code_system_display(
+            _first_present(record, "code_vocab", "code_system", default=_codeable_system(raw_code))
+        )
         if code_system:
             lines.append(f"Code System: {code_system}")
 
@@ -2382,13 +2400,20 @@ def _map_allergy(record: dict, doctor_id: Optional[int], patient_id: Optional[in
         "status": _active_status(record.get("clinicalStatus") or record.get("status"), default="active"),
     }
 
+    note_record = record
     reaction = record.get("reaction") or record.get("reaction_manifestation")
     if isinstance(reaction, list) and reaction:
-        reaction = _codeable_text((reaction[0] or {}).get("manifestation"))
+        reaction_entry = reaction[0] or {}
+        manifestation = reaction_entry.get("manifestation") if isinstance(reaction_entry, dict) else None
+        if isinstance(manifestation, list) and manifestation:
+            manifestation = manifestation[0]
+        reaction = _codeable_text(manifestation) or _value_to_text(manifestation)
+        if isinstance(reaction_entry, dict) and reaction_entry.get("severity") and not record.get("reaction_severity"):
+            note_record = {**record, "reaction_severity": reaction_entry.get("severity")}
     if reaction:
         payload["reaction"] = str(reaction)
 
-    notes = _compose_allergy_notes(record, name, reaction)
+    notes = _compose_allergy_notes(note_record, name, reaction)
     if notes:
         payload["notes"] = notes
 
@@ -4512,13 +4537,18 @@ def _live_push_record(
     if is_patient:
         existing_id = _find_existing_patient(payload, token)
         if existing_id:
+            message = (
+                "Patient already present in DrChrono; no need to push this patient "
+                "again in DrChrono"
+            )
+            log.info("%s ID=%s", message, existing_id)
             return {
                 "success": True,
                 "status_code": 200,
                 "drchrono_id": existing_id,
                 "error": "",
                 "already_exists": True,
-                "message": f"Patient already exists in DrChrono ID={existing_id}",
+                "message": f"{message} ID={existing_id}",
             }
 
     log.info("POST %s payload=%s", url, payload)
@@ -5083,9 +5113,6 @@ async def push_document_file(
         metatags=metatags,
         archived=archived,
     )
-
-
-
 
 
 

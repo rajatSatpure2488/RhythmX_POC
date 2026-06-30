@@ -36,7 +36,8 @@ const FHIR_SCHEMA = {
   // Transformed observations come as lab results (value/test_name/date_collected)
   // or pivoted vitals (bp_s, pulse, ...). Both share the patient link.
   observations:  { required:['patient_id'], optional:['value','test_name','units','date_collected','abnormal_status','bp_s','bp_d','pulse','respiratory_rate','temperature','weight','height','oxygen_saturation','bmi','encounter_id','doctor','code','effective_date'] },
-  allergies:     { required:['substance','status','patient_id'], optional:['severity','reaction','onset'] },
+  allergies:     { required:['description','status'], optional:['reaction','notes','rxnorm','snomed_reaction','patient_id','code','category','type'] },
+  allergy:       { required:['description','status'], optional:['reaction','notes','rxnorm','snomed_reaction','patient_id','code','category','type'] },
   immunizations: { required:['vaccine_code','date','patient_id'], optional:['dose','manufacturer','status'] },
   procedures:    { required:['code','performed','patient_id'], optional:['performer','outcome','status'] },
   patient:       { required:['name','birth_date','gender'], optional:['id','address','phone','email'] },
@@ -69,6 +70,7 @@ const DRCHRONO_ENDPOINTS = {
   service_requests:     'POST /api/lab_orders',
   servicerequests:      'POST /api/lab_orders',
   allergies:            'POST /api/allergies',
+  allergy:              'POST /api/allergies',
   immunizations:        'POST /api/patient_vaccine_records',
   procedures:           'POST /api/procedures',
   patient:              'POST /api/patients',
@@ -102,7 +104,11 @@ const FIELD_ALIASES = {
   'patient_id': ['patientid', 'patient', 'memberid'],
   'patient':    ['patient', 'patientid', 'memberid'],
   'document':   ['document', 'filepath', 'filename', 'localpath', 'documentpath', 'filecontent', 'data', 'attachmentdata'],
-  'description':['description', 'name', 'namefull', 'title', 'label'],
+  'description':[
+    'description', 'name', 'namefull', 'nameshort', 'namerx', 'title', 'label',
+    'substance', 'substancedisplay', 'allergen', 'allergenname', 'allergendisplay',
+    'code', 'codetext', 'codedisplay',
+  ],
   // Appointment date can arrive as scheduled_time (DrChrono) or other date fields.
   'date':       ['date', 'scheduledtime', 'datereport', 'documentdate', 'effectivedt', 'appointmentdate'],
   'note_id':    ['noteid', 'sourcenoteid'],

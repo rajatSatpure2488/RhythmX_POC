@@ -3,7 +3,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from app.routes.push import _map_patient
+from app.routes.push import _live_push_record, _map_patient
 
 
 def test_patient_maps_raw_csv_column_names():
@@ -216,6 +216,63 @@ def test_patient_mapping_minimum_record_still_succeeds():
         "gender": "Other",
         "doctor": 1234,
     }
+
+
+class _FakeResponse:
+    def __init__(self, status_code, body=None, text=""):
+        self.status_code = status_code
+        self._body = body or {}
+        self.text = text
+
+    def json(self):
+        return self._body
+
+
+def test_patient_live_push_skips_duplicate_from_drchrono_get(monkeypatch):
+    calls = {"get": [], "post": []}
+
+    def fake_get(url, params=None, headers=None, timeout=None):
+        calls["get"].append({
+            "url": url,
+            "params": params,
+            "headers": headers,
+            "timeout": timeout,
+        })
+        return _FakeResponse(200, {"results": [{"id": 98765}]})
+
+    def fake_post(*args, **kwargs):
+        calls["post"].append((args, kwargs))
+        raise AssertionError("Duplicate patient should not be posted to DrChrono")
+
+    monkeypatch.setattr("app.routes.push.requests.get", fake_get)
+    monkeypatch.setattr("app.routes.push.requests.post", fake_post)
+
+    result = _live_push_record(
+        {
+            "first_name": "Samuel",
+            "last_name": "Rossi",
+            "date_of_birth": "1945-01-15",
+            "gender": "Male",
+        },
+        "patients",
+        token="token-123",
+        doctor_id=525460,
+    )
+
+    assert calls["get"]
+    assert calls["get"][0]["params"] == {
+        "first_name": "Samuel",
+        "last_name": "Rossi",
+        "date_of_birth": "1945-01-15",
+    }
+    assert calls["post"] == []
+    assert result["success"] is True
+    assert result["already_exists"] is True
+    assert result["drchrono_id"] == 98765
+    assert (
+        "Patient already present in DrChrono; no need to push this patient again in DrChrono"
+        in result["message"]
+    )
 
 
 def test_patient_mapping_omits_empty_nested_objects():

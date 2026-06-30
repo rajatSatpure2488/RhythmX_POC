@@ -17,9 +17,19 @@ REQUIRED_FIELDS = {
     "conditions":     ["icd_code"],
     "medications":    ["drug_name"],
     "observations":   ["value"],
-    "allergies":      ["allergen"],
+    "allergies":      ["description", "status"],
+    "allergy":        ["description", "status"],
     "immunizations":  ["vaccine"],
     "clinical_notes": ["note_text"],
+}
+
+FIELD_ALIASES = {
+    "description": [
+        "description", "name", "name_full", "name_short", "name_rx",
+        "substance", "substance_display", "allergen", "allergen_name",
+        "allergen_display", "code", "code_text", "code_display",
+    ],
+    "status": ["status", "clinicalStatus", "clinical_status"],
 }
 
 
@@ -32,10 +42,18 @@ def _validate_record(record: dict, required: List[str]) -> List[str]:
     """Return list of missing/null required fields."""
     errors = []
     for field in required:
-        val = record.get(field)
+        val = None
+        for key in FIELD_ALIASES.get(field, [field]):
+            val = record.get(key)
+            if val not in (None, "", []):
+                break
         if val is None or val == "" or val == []:
             errors.append(f"Missing required field: '{field}'")
     return errors
+
+
+def _canonical_key(key: str) -> str:
+    return "allergies" if key == "allergy" else key
 
 
 @router.post("/run")
@@ -55,7 +73,7 @@ async def run_dryrun(req: DryRunRequest):
 
     for key in target_keys:
         records  = source.get(key, [])
-        required = REQUIRED_FIELDS.get(key, [])  # empty list = no required checks
+        required = REQUIRED_FIELDS.get(key, REQUIRED_FIELDS.get(_canonical_key(key), []))  # empty list = no required checks
 
         if not records:
             details[key] = {"rate": 100, "errors": [], "count": 0}

@@ -168,28 +168,43 @@ class TestAllergyMapper:
         "resourceType": "AllergyIntolerance",
         "patient": {"reference": "Patient/12345"},
         "clinicalStatus": {"coding": [{"code": "active"}]},
-        "criticality": "high",
+        "criticality": "low",
+        "type": "allergy",
         "category": ["medication"],
-        "code": {"coding": [{"code": "372687004", "display": "Penicillin"}], "text": "Penicillin"},
-        "reaction": [{"manifestation": [{"coding": [{"display": "Anaphylaxis"}]}], "severity": "severe"}],
+        "code": {
+            "coding": [{"system": "http://snomed.info/sct", "code": "91936005", "display": "Penicillin"}],
+            "text": "Penicillin",
+        },
+        "reaction": [{"manifestation": [{"coding": [{"code": "271807003", "display": "Rash"}]}], "severity": "Mild"}],
+        "rxnorm": "7980",
+        "snomed_reaction": "271807003",
     }
 
     def test_happy_path(self):
         m = get_mapper("AllergyIntolerance")
         r = m.transform(self.FHIR, CTX)
         assert r.success
-        assert r.payload["allergen"] == "Penicillin"
+        assert r.payload["description"] == "Penicillin"
         assert r.payload["doctor"] == 1234
-        assert r.payload["severity"] == "severe"
         assert r.payload["status"] == "active"
+        assert r.payload["reaction"] == "Rash"
+        assert r.payload["rxnorm"] == "7980"
+        assert r.payload["snomed_reaction"] == "271807003"
+        assert "snomed_code" not in r.payload
+        assert "verification_status" not in r.payload
+        assert "Code: 91936005" in r.payload["notes"]
+        assert "Code System: SNOMED CT" in r.payload["notes"]
+        assert "Criticality: Low Risk" in r.payload["notes"]
 
-    def test_criticality_fallback(self):
+    def test_notes_still_render_without_reaction(self):
         fhir = {**self.FHIR, "reaction": []}
         m = get_mapper("AllergyIntolerance")
         r = m.transform(fhir, CTX)
-        assert r.payload["severity"] == "severe"
+        assert r.success
+        assert "Source: RhythmX AI Import" in r.payload["notes"]
+        assert "Code: 91936005" in r.payload["notes"]
 
-    def test_missing_allergen_fails(self):
+    def test_missing_description_fails(self):
         m = get_mapper("AllergyIntolerance")
         r = m.transform({"resourceType": "AllergyIntolerance"}, CTX)
         assert not r.success

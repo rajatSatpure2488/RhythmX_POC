@@ -39,9 +39,24 @@ FIELD_MAPS = {
         "date":       ["effectiveDateTime", "date"],
     },
     "allergies": {
-        "allergen": ["code", "substance", "allergen"],
+        "description": [
+            "description", "name", "name_full", "name_short", "name_rx",
+            "substance", "substance_display", "allergen", "allergen_name",
+            "allergen_display", "code", "code_text", "code_display",
+        ],
         "reaction": ["reaction", "manifestation"],
-        "severity": ["severity", "criticality"],
+        "status": ["status", "clinicalStatus"],
+        "notes": ["allergy_note", "notes", "note"],
+    },
+    "allergy": {
+        "description": [
+            "description", "name", "name_full", "name_short", "name_rx",
+            "substance", "substance_display", "allergen", "allergen_name",
+            "allergen_display", "code", "code_text", "code_display",
+        ],
+        "reaction": ["reaction", "manifestation"],
+        "status": ["status", "clinicalStatus"],
+        "notes": ["allergy_note", "notes", "note"],
     },
     "immunizations": {
         "vaccine": ["vaccineCode", "vaccine_name"],
@@ -62,7 +77,7 @@ def _map_record(record: dict, field_map: dict) -> dict:
     for target, sources in field_map.items():
         for src in sources:
             val = record.get(src)
-            if val is not None:
+            if val not in (None, "", []):
                 out[target] = val
                 break
         if target not in out:

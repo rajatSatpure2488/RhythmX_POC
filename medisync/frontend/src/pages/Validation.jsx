@@ -36,6 +36,7 @@ const DRCHRONO_ENDPOINTS = {
   encounters:           { method:'POST',  path:'/api/appointments',                 note:'Requires doctor_id + patient_id' },
   observations:         { method:'POST',  path:'/api/patient_lab_results',          note:'Structured lab result per observation (joined with notes)' },
   allergies:            { method:'POST',  path:'/api/allergies',                    note:'Requires patient_id' },
+  allergy:              { method:'POST',  path:'/api/allergies',                    note:'Requires patient_id' },
   immunizations:        { method:'POST',  path:'/api/patient_vaccine_records',      note:'Requires patient_id' },
   procedures:           { method:'POST',  path:'/api/procedures',                  note:'Requires patient_id' },
   documents:            { method:'POST',  path:'/api/documents',                   note:'Multipart file upload (PDF, JPG, etc.)' },
@@ -54,7 +55,8 @@ const REQUIRED = {
   problems:             ['code','status','patient_id'],
   encounters:           ['date'],   // pushed as appointments; date = scheduled_time
   observations:         ['patient_id'],   // labs (value) or pivoted vitals; share patient link
-  allergies:            ['substance','status','patient_id'],
+  allergies:            ['description','status'],
+  allergy:              ['description','status'],
   immunizations:        ['vaccine_code','date','patient_id'],
   procedures:           ['code','performed_date','patient_id'],
   patient:              ['name','birth_date','gender'],
@@ -74,6 +76,7 @@ const TROUBLESHOOT = {
     patient:    `1. Check your patients CSV has 'name', 'birth_date', 'gender' columns.\n2. Ensure no rows are blank for these fields.\n3. Re-upload after filling missing values.`,
     medications:`1. Check 'name', 'dosage', 'status' columns exist in medications CSV.\n2. Null values will be rejected by DrChrono API.\n3. Add default values (e.g. status='active') before re-ingesting.`,
     conditions: `1. Ensure 'code', 'status', 'patient_id' are populated per row.\n2. DrChrono rejects conditions without a valid patient_id.\n3. Run Patient stage first to generate patient IDs.`,
+    allergies:  `1. Ensure allergy rows map to 'description' and 'status'.\n2. The allergen code belongs inside notes, not snomed_code unless explicitly provided.\n3. Run Patient stage first so patient_id is available before push.`,
     encounters: `1. 'type', 'date', 'patient_id' are required.\n2. Dates must be in YYYY-MM-DD format.\n3. patient_id must match a created patient in DrChrono.`,
     documents:  `1. Each document row must have 'patient' (patient_id), 'description', and 'document' (base64 or file path).\n2. DrChrono /api/documents uses multipart upload — the file content is required.\n3. Supported file types: PDF, JPEG, PNG, TIFF.\n4. If using FHIR DocumentReference, ensure content[0].attachment.data has the base64 content.`,
     document_reference: `1. FHIR DocumentReference must have content[0].attachment.data (base64 encoded).\n2. Also needs subject.reference or _drchrono_patient_id.\n3. The attachment.contentType determines the upload MIME type.`,
@@ -102,7 +105,11 @@ const FIELD_ALIASES = {
   'patientid':    ['patientid', 'patient', 'memberid'],
   'patient':      ['patient', 'patientid', 'memberid'],
   'document':     ['document', 'filepath', 'filename', 'localpath', 'documentpath', 'filecontent', 'data', 'attachmentdata'],
-  'description':  ['description', 'name', 'namefull', 'title', 'label'],
+  'description':  [
+    'description', 'name', 'namefull', 'nameshort', 'namerx', 'title', 'label',
+    'substance', 'substancedisplay', 'allergen', 'allergenname', 'allergendisplay',
+    'code', 'codetext', 'codedisplay',
+  ],
   'date':         ['date', 'scheduledtime', 'datereport', 'documentdate', 'effectivedt', 'appointmentdate'],
   'noteid':       ['noteid', 'sourcenoteid'],
   // Insurer name arrives as insurance_company (transformed) or payor_name (raw).
@@ -133,6 +140,17 @@ function resolveValue(val) {
     }
     return String(first)
   }
+  if (typeof val === 'object') {
+    if (val.text) return val.text
+    if (val.display) return val.display
+    if (Array.isArray(val.coding) && val.coding[0]) {
+      return val.coding[0].display || val.coding[0].code || undefined
+    }
+    if (typeof val.reference === 'string') {
+      const parts = val.reference.split('/')
+      return parts[parts.length - 1]
+    }
+  }
   return val
 }
 
@@ -144,26 +162,51 @@ const REQUIRED_DEFAULTS = {
   conditions: { status: 'active' },
   problems:   { status: 'active' },
   allergies:  { status: 'active' },
+  allergy:    { status: 'active' },
   medications:{ status: 'active' },
+}
+
+function canonicalResourceKey(resourceKey) {
+  return resourceKey === 'allergy' ? 'allergies' : resourceKey
+}
+
+function getRequiredFieldValue(rec, requiredField) {
+  const allFields = Object.keys(rec)
+  const rfNorm = normalizeKey(requiredField)
+  const aliases = FIELD_ALIASES[rfNorm] || [rfNorm]
+  const candidates = []
+
+  for (const f of allFields) {
+    const fNorm = normalizeKey(f)
+    if (fNorm === rfNorm || aliases.includes(fNorm)) candidates.push(f)
+  }
+  for (const f of allFields) {
+    const fNorm = normalizeKey(f)
+    if (!candidates.includes(f) && (rfNorm.includes(fNorm) || fNorm.includes(rfNorm))) {
+      candidates.push(f)
+    }
+  }
+
+  let firstMatchedKey = null
+  for (const key of candidates) {
+    if (firstMatchedKey === null) firstMatchedKey = key
+    const val = resolveValue(rec[key])
+    if (val !== null && val !== undefined && val !== '') {
+      return { key, val }
+    }
+  }
+
+  return { key: firstMatchedKey || requiredField, val: undefined }
 }
 
 function auditRecord(rec, resourceKey) {
   const errors = []
-  const reqFields = REQUIRED[resourceKey] || []
-  const allFields = Object.keys(rec)
-  const defaults = REQUIRED_DEFAULTS[resourceKey] || {}
+  const canonicalKey = canonicalResourceKey(resourceKey)
+  const reqFields = REQUIRED[resourceKey] || REQUIRED[canonicalKey] || []
+  const defaults = REQUIRED_DEFAULTS[resourceKey] || REQUIRED_DEFAULTS[canonicalKey] || {}
 
   for (const rf of reqFields) {
-    const rfNorm = normalizeKey(rf)
-    const aliases = FIELD_ALIASES[rfNorm] || [rfNorm]
-    // Find source key whose normalized form matches the schema field OR any alias
-    const matchKey = allFields.find(f => {
-      const fNorm = normalizeKey(f)
-      return fNorm === rfNorm || aliases.includes(fNorm)
-        || rfNorm.includes(fNorm) || fNorm.includes(rfNorm)
-    })
-    const rawVal = matchKey !== undefined ? rec[matchKey] : undefined
-    const val = resolveValue(rawVal)  // unwrap FHIR arrays
+    const { key: matchKey, val } = getRequiredFieldValue(rec, rf)
     if (val === null || val === undefined || val === '') {
       if (defaults[rf] !== undefined) continue  // backend will fill this in
       errors.push({ field: matchKey || rf, type:'null_value', tag:'Null value', cls:'err-tag--null',
@@ -171,6 +214,7 @@ function auditRecord(rec, resourceKey) {
     }
   }
 
+  const allFields = Object.keys(rec)
   for (const f of allFields) {
     const lower = f.toLowerCase()
     if (lower.includes('date') || lower.endsWith('_on') || lower.endsWith('_at') || lower.endsWith('date')) {
@@ -197,7 +241,9 @@ function auditRecord(rec, resourceKey) {
   }
 
   for (const f of allFields) {
-    if (f.toLowerCase().includes('code') || f.toLowerCase().includes('icd')) {
+    const lower = f.toLowerCase()
+    const skipTerminologyCheck = canonicalKey === 'allergies'
+    if (!skipTerminologyCheck && (lower.includes('code') || lower.includes('icd'))) {
       const val = String(rec[f] || '')
       if (val.length > 10 && /\s/.test(val)) {
         errors.push({ field: f, type:'terminology', tag:'Terminology', cls:'err-tag--term',

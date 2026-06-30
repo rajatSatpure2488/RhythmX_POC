@@ -38,11 +38,11 @@ FIELD_MAPPING_REFERENCE: dict[str, dict[str, Any]] = {
         "notes": "Requires patient_id. At least one of icd_code or description required.",
     },
     "allergy": {
-        "csv_fields":     ["allergen", "reaction", "severity", "status"],
-        "drchrono_fields":["description", "reaction", "severity", "status"],
-        "fhir_fields":    ["code.coding[0].display","reaction[0].manifestation[0].coding[0].display","reaction[0].severity","clinicalStatus.coding[0].code"],
+        "csv_fields":     ["name_full/substance/allergen", "reaction", "status", "allergy_note/notes", "rxnorm"],
+        "drchrono_fields":["description", "reaction", "status", "notes", "rxnorm", "snomed_reaction"],
+        "fhir_fields":    ["code.coding[0].display","reaction[0].manifestation[0].coding[0].display","clinicalStatus.coding[0].code","note[0].text"],
         "drchrono_endpoint": "/api/allergies",
-        "notes": "Requires patient_id.",
+        "notes": "Requires patient_id. Allergen code is included in notes, not sent as snomed_code unless source explicitly provides snomed_code.",
     },
     "encounter": {
         "csv_fields":     ["encounter_date", "encounter_type", "duration_minutes"],
@@ -85,7 +85,7 @@ DATA_REQUIRED_FIELDS: dict[str, list[tuple[str, str, str]]] = {
     "condition": [],  # Special: needs icd_code OR description
     "allergy": [
         ("description", "Allergen substance name (e.g. 'Penicillin')",
-         "Add 'allergen' column to CSV or check FHIR code.coding[].display"),
+         "Add 'name_full', 'substance', or 'allergen' column to CSV, or check FHIR code.coding[].display"),
     ],
     "encounter": [
         ("scheduled_time", "Appointment datetime (YYYY-MM-DDTHH:MM:SS)",
@@ -140,7 +140,8 @@ RECOMMENDED_FIELDS: dict[str, list[tuple[str, str, str]]] = {
     ],
     "allergy": [
         ("reaction",  "Allergic reaction (e.g. 'Rash')",        "Add 'reaction' column"),
-        ("severity",  "Severity: mild, moderate, or severe",     "Add 'severity' column"),
+        ("notes",     "Structured allergy note block for DrChrono", "Add 'allergy_note' or let the mapper synthesize notes from reaction/category/code"),
+        ("rxnorm",    "RxNorm code when available",             "Add 'rxnorm' column if present in source"),
     ],
     "encounter":    [],
     "observation": [
@@ -174,6 +175,7 @@ def validate(
     Pass 2 — Format / type / enum correctness
     Pass 3 — Cross-resource consistency
     """
+    resource_type = _canonical_resource_type(resource_type)
     issues: list[dict[str, Any]] = []
     issues += _pass1_required(resource_type, payload)
     issues += _pass2_format(resource_type, payload)
@@ -186,6 +188,11 @@ def validate(
     issues += _recommended_info(resource_type, payload)
 
     return issues
+
+
+def _canonical_resource_type(resource_type: str) -> str:
+    rt = (resource_type or "").lower()
+    return "allergy" if rt == "allergies" else rt
 
 
 # ── Pass 1: Required fields ──────────────────────────────────────────
@@ -270,9 +277,10 @@ def _pass2_format(rt: str, payload: dict) -> list[dict]:
                 fix_hint="Ensure the duration/duration_minutes column contains only integers like 15, 30, 60",
             ))
 
-    # Severity enum (allergy)
+    # Allergy reaction severity is stored inside notes, not sent as a top-level
+    # DrChrono field, so it should never block validation.
     sev = payload.get("severity")
-    if sev and rt == "allergy" and str(sev).lower() not in {"mild","moderate","severe",""}:
+    if sev and rt != "allergy" and str(sev).lower() not in {"mild","moderate","severe",""}:
         issues.append(_issue(
             pass_number=2, category="enum", severity="error",
             field="severity",
