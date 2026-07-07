@@ -320,7 +320,7 @@ function TransformationShowcase({ resourceKey, record, results }) {
         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
           <path d="M4 17l6-6-6-6M12 19h8"/>
         </svg>
-        <p>Select a resource category to view live FHIR R4 transformation logic</p>
+        <p>Select a resource category to view live DrChrono payload mapping</p>
       </div>
     </div>
   )
@@ -336,12 +336,12 @@ function TransformationShowcase({ resourceKey, record, results }) {
 
   const { mappedFields, unmappedRequired } = mapRecord(displayRecord, resourceKey)
   
-  // Format as FHIR R4 Structure
-  const fhirStructure = {
+  // Format as a DrChrono-oriented preview payload
+  const drchronoPreview = {
     resourceType: resourceKey.charAt(0).toUpperCase() + resourceKey.slice(1).replace(/s$/, ''),
     ...mappedFields,
     meta: {
-      profile: [`http://hl7.org/fhir/us/core/StructureDefinition/us-core-${resourceKey.replace(/s$/, '')}`],
+      source: 'medisync-csv-mapping',
       lastUpdated: new Date().toISOString()
     }
   }
@@ -438,11 +438,11 @@ function TransformationShowcase({ resourceKey, record, results }) {
           </div>
         </div>
 
-        {/* FHIR Output */}
+        {/* DrChrono Output */}
         <div className="showcase-section">
-          <div className="showcase-section__label">Output (FHIR R4 JSON)</div>
+          <div className="showcase-section__label">Output (DrChrono Payload Preview)</div>
           <div className="showcase-json">
-            <pre>{JSON.stringify(fhirStructure, null, 2)}</pre>
+            <pre>{JSON.stringify(drchronoPreview, null, 2)}</pre>
           </div>
         </div>
       </div>
