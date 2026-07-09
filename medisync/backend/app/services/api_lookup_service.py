@@ -118,7 +118,13 @@ def run_lookup(
         path_params=path_params or None,
         timeout=timeout,
     )
-    log.info("EMR lookup '%s' emr=%s api=%s status=%d", lookup_name, get_emr_name(), lookup_cfg["api"], resp.status_code)
+    log.info(
+        "EMR lookup '%s' emr=%s api=%s status=%d",
+        lookup_name,
+        get_emr_name(),
+        lookup_cfg["api"],
+        resp.status_code,
+    )
     result = resp.json() if resp.status_code == 200 else None
     if cache_key:
         _LOOKUP_CACHE[cache_key] = result

@@ -12,11 +12,11 @@ import base64
 import io
 import json
 import logging
-import requests
 from pathlib import Path
 from typing import Any, Dict, Optional
 from fastapi import HTTPException
 from app.core import config
+from app.core.http_client import HTTPClientManager
 from app.services.token_store import token_store
 
 log = logging.getLogger("medisync.drchrono_proxy")
@@ -58,7 +58,7 @@ def _build_headers(token: str) -> Dict:
 def _build_multipart_headers(token: str) -> Dict:
     """
     Headers for multipart/form-data requests (documents).
-    Do NOT set Content-Type — requests sets it automatically with the boundary.
+    Do NOT set Content-Type — HTTPX sets it automatically with the boundary.
     """
     return {
         "Authorization":     f"Bearer {token}",
@@ -121,7 +121,7 @@ def drchrono_get(endpoint: str, params: Optional[Dict] = None) -> Any:
     url = f"{config.DRCHRONO_API_BASE}{endpoint}"
     clean_params = {k: v for k, v in (params or {}).items() if v is not None}
     log.info(f"GET {url} params={clean_params}")
-    resp = requests.get(url, headers=_build_headers(token), params=clean_params, timeout=30)
+    resp = HTTPClientManager.get_http_client().get(url, headers=_build_headers(token), params=clean_params, timeout=30)
     if resp.status_code >= 400:
         detail = resp.text[:500]
         try:
@@ -137,7 +137,7 @@ def drchrono_post(endpoint: str, payload: Dict) -> Any:
     token = _get_token()
     url = f"{config.DRCHRONO_API_BASE}{endpoint}"
     log.info(f"POST {url} keys={list(payload.keys())}")
-    resp = requests.post(url, headers=_build_headers(token), json=payload, timeout=30)
+    resp = HTTPClientManager.get_http_client().post(url, headers=_build_headers(token), json=payload, timeout=30)
     if resp.status_code >= 400:
         detail = resp.text[:500]
         try:
@@ -206,7 +206,7 @@ def drchrono_post_document(
     log.info("POST %s (multipart) form_fields=%s filename=%s size=%d bytes",
              url, list(form_data.keys()), filename, len(document_bytes))
 
-    resp = requests.post(
+    resp = HTTPClientManager.get_http_client().post(
         url,
         headers=_build_multipart_headers(token),
         data=form_data,

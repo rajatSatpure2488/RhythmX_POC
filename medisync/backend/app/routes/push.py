@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 from typing import Any, List, Optional
 
-import requests
+import httpx
 from fastapi import APIRouter, HTTPException, File, Form, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
@@ -29,7 +29,6 @@ from app.services.api_request_client import (
     build_payload_from_record,
     call_configured_api,
     format_api_error,
-    get_emr_name,
 )
 from app.services.push_config import (
     ENDPOINT_MAP,
@@ -433,7 +432,7 @@ def _upload_document(record: dict, token: str, doctor_id: Optional[int], patient
             "success": False,
             "status_code": 0,
             "drchrono_id": None,
-            "error": "Cannot upload document: EMR patient_id is missing",
+            "error": "Cannot upload document: DrChrono patient_id is missing",
             "already_exists": False,
         }
 
@@ -648,7 +647,7 @@ def _upload_diagnostic_report_as_document(
     """
     if not patient_id:
         return {"success": False, "status_code": 0, "drchrono_id": None,
-                "error": "Cannot upload report: EMR patient_id is missing",
+                "error": "Cannot upload report: DrChrono patient_id is missing",
                 "already_exists": False}
 
     description = _first_present(
@@ -731,7 +730,7 @@ def _upload_diagnostic_report_as_document(
             data=data,
             files={"document": (filename, pdf_bytes, "application/pdf")},
         )
-        log.info("EMR response emr=%s status=%d body=%s", get_emr_name(), resp.status_code, resp.text[:500])
+        log.info("DrChrono response: %d — %s", resp.status_code, resp.text[:500])
 
         if resp.status_code in (200, 201):
             body = resp.json()
@@ -864,7 +863,7 @@ def _upload_clinical_note_as_document(
     """
     if not patient_id:
         return {"success": False, "status_code": 0, "drchrono_id": None,
-                "error": "Cannot upload clinical note: EMR patient_id is missing",
+                "error": "Cannot upload clinical note: DrChrono patient_id is missing",
                 "already_exists": False}
 
     sections = note.get("sections") or []
@@ -903,7 +902,7 @@ def _upload_clinical_note_as_document(
             data=data,
             files={"document": (filename, pdf_bytes, "application/pdf")},
         )
-        log.info("EMR response emr=%s status=%d body=%s", get_emr_name(), resp.status_code, resp.text[:400])
+        log.info("DrChrono response: %d — %s", resp.status_code, resp.text[:400])
         if resp.status_code in (200, 201):
             return {"success": True, "status_code": resp.status_code,
                     "drchrono_id": resp.json().get("id"), "error": "", "already_exists": False}
@@ -1061,7 +1060,7 @@ def _refresh_access_token() -> Optional[str]:
             )
             return new_access
     except Exception as e:
-        log.warning("EMR token refresh failed emr=%s error=%s", get_emr_name(), e)
+        log.warning("DrChrono token refresh failed: %s", e)
     return None
 
 
@@ -1321,7 +1320,7 @@ def _upload_coverage(record: dict, token: str, doctor_id: Optional[int], patient
     """
     if not patient_id:
         return {"success": False, "status_code": 0, "drchrono_id": None,
-                "error": "Cannot push coverage: EMR patient_id is missing",
+                "error": "Cannot push coverage: DrChrono patient_id is missing",
                 "already_exists": False}
 
     plan_type = str(_first_present(record, "insurance_plan_type", "coverage_rank", default="primary")).strip().lower()
@@ -1347,7 +1346,7 @@ def _upload_coverage(record: dict, token: str, doctor_id: Optional[int], patient
     try:
         log.info("Configured coverage/insurances payload=%s", payload)
         resp = call_configured_api("coverage", token, payload=payload)
-        log.info("EMR response emr=%s status=%d body=%s", get_emr_name(), resp.status_code, resp.text[:400])
+        log.info("DrChrono response: %d — %s", resp.status_code, resp.text[:400])
         if resp.status_code in (200, 201, 204):
             drchrono_id = None
             try:
@@ -1821,7 +1820,7 @@ def _live_push_record(
             "success": False,
             "status_code": 0,
             "drchrono_id": None,
-            "error": f"Cannot push {resource}: EMR patient_id is missing",
+            "error": f"Cannot push {resource}: DrChrono patient_id is missing",
             "already_exists": False,
         }
 
@@ -1865,7 +1864,7 @@ def _live_push_record(
                 "status_code": 422,
                 "drchrono_id": None,
                 "error": f"scheduled_time: {sched[:10]} is before year 2000 — "
-                         f"EMR only accepts appointment dates in the range 2000-2099.",
+                         f"DrChrono only accepts appointment dates in the range 2000-2099.",
                 "already_exists": False,
                 "retryable": False,
             }
@@ -1897,14 +1896,14 @@ def _live_push_record(
                 "drchrono_id": existing_id,
                 "error": "",
                 "already_exists": True,
-                "message": f"Patient already exists in EMR ID={existing_id}",
+                "message": f"Patient already exists in DrChrono ID={existing_id}",
             }
 
-    log.info("Calling configured EMR API emr=%s api=%s payload=%s", get_emr_name(), key, payload)
+    log.info("Calling configured DrChrono API '%s' payload=%s", key, payload)
 
     try:
         resp = call_configured_api(key, token, payload=payload)
-        log.info("EMR response emr=%s status=%d body=%s", get_emr_name(), resp.status_code, resp.text[:800])
+        log.info("DrChrono response: %d — %s", resp.status_code, resp.text[:800])
 
         if resp.status_code in (200, 201):
             body = resp.json()
@@ -1929,7 +1928,7 @@ def _live_push_record(
             "already_exists": False,
         }
 
-    except requests.exceptions.Timeout:
+    except httpx.TimeoutException:
         return {
             "success": False,
             "status_code": 0,
@@ -1938,7 +1937,7 @@ def _live_push_record(
             "already_exists": False,
         }
 
-    except requests.exceptions.ConnectionError:
+    except httpx.RequestError:
         return {
             "success": False,
             "status_code": 0,
@@ -1973,7 +1972,7 @@ def push_preflight():
     if record_count == 0:
         issues.append("No data in backend session. Re-upload your file.")
     if not token_valid:
-        issues.append("No valid EMR token. Authenticate first.")
+        issues.append("No valid DrChrono token. Authenticate first.")
     if token_valid and not doctor_id:
         issues.append("Doctor ID missing from token.")
 
@@ -2022,7 +2021,7 @@ async def push_run(req: PushRequest):
         elif tok_obj and tok_obj.access_token:
             token = tok_obj.access_token
         else:
-            raise HTTPException(status_code=401, detail="No EMR token. Please authenticate first.")
+            raise HTTPException(status_code=401, detail="No DrChrono token. Please authenticate first.")
 
         if not doctor_id and tok_obj and tok_obj.doctor_id:
             try:
@@ -2151,7 +2150,7 @@ def push_run_stream(req: PushRequest):
         elif tok_obj and tok_obj.access_token:
             token = tok_obj.access_token
         else:
-            raise HTTPException(status_code=401, detail="No EMR token. Please authenticate first.")
+            raise HTTPException(status_code=401, detail="No DrChrono token. Please authenticate first.")
         if not doctor_id and tok_obj and tok_obj.doctor_id:
             try:
                 doctor_id = int(tok_obj.doctor_id)

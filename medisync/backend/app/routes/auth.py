@@ -1,7 +1,7 @@
 """
 MediSync — /auth router
 OAuth 2.0 and manual token endpoints for DrChrono EHR authentication.
-Uses config module (loads .env at import time) and sync requests client.
+Uses config module (loads .env at import time) and shared HTTPX client.
 """
 
 import logging

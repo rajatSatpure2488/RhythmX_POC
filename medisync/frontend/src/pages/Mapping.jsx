@@ -36,7 +36,8 @@ const FHIR_SCHEMA = {
   // Transformed observations come as lab results (value/test_name/date_collected)
   // or pivoted vitals (bp_s, pulse, ...). Both share the patient link.
   observations:  { required:['patient_id'], optional:['value','test_name','units','date_collected','abnormal_status','bp_s','bp_d','pulse','respiratory_rate','temperature','weight','height','oxygen_saturation','bmi','encounter_id','doctor','code','effective_date'] },
-  allergies:     { required:['substance','status','patient_id'], optional:['severity','reaction','onset'] },
+  allergies:     { required:['description'], optional:['status','reaction','notes','rxnorm','snomed_reaction','snomed_code','verification_status','patient_id','patient','doctor','criticality','category','type','code','code_vocab'] },
+  allergy:       { required:['description'], optional:['status','reaction','notes','rxnorm','snomed_reaction','snomed_code','verification_status','patient_id','patient','doctor','criticality','category','type','code','code_vocab'] },
   immunizations: { required:['vaccine_code','date','patient_id'], optional:['dose','manufacturer','status'] },
   procedures:    { required:['code','performed','patient_id'], optional:['performer','outcome','status'] },
   patient:       { required:['name','birth_date','gender'], optional:['id','address','phone','email'] },
@@ -69,6 +70,7 @@ const DRCHRONO_ENDPOINTS = {
   service_requests:     'POST /api/lab_orders',
   servicerequests:      'POST /api/lab_orders',
   allergies:            'POST /api/allergies',
+  allergy:              'POST /api/allergies',
   immunizations:        'POST /api/patient_vaccine_records',
   procedures:           'POST /api/procedures',
   patient:              'POST /api/patients',
@@ -102,7 +104,16 @@ const FIELD_ALIASES = {
   'patient_id': ['patientid', 'patient', 'memberid'],
   'patient':    ['patient', 'patientid', 'memberid'],
   'document':   ['document', 'filepath', 'filename', 'localpath', 'documentpath', 'filecontent', 'data', 'attachmentdata'],
-  'description':['description', 'name', 'namefull', 'title', 'label'],
+  'description':['description', 'name', 'namefull', 'nameshort', 'title', 'label', 'substance', 'allergen', 'allergentext', 'allergyname'],
+  'reaction':   ['reaction', 'reactionmanifestation', 'reactiontext', 'reactioncode', 'manifestation'],
+  'rxnorm':     ['rxnorm', 'rxnormcode'],
+  'snomed_reaction': ['snomedreaction'],
+  'snomed_code': ['snomedcode'],
+  'verification_status': ['verificationstatus', 'verificationstatuscode'],
+  'criticality': ['criticality', 'allergycriticality'],
+  'category':   ['category', 'allergycategory'],
+  'type':       ['type', 'allergytype'],
+  'code_vocab': ['codevocab', 'codesystem', 'allergencodesystem'],
   // Appointment date can arrive as scheduled_time (DrChrono) or other date fields.
   'date':       ['date', 'scheduledtime', 'datereport', 'documentdate', 'effectivedt', 'appointmentdate'],
   'note_id':    ['noteid', 'sourcenoteid'],
@@ -145,11 +156,15 @@ function resolveValue(val) {
         const given = Array.isArray(first.given) ? first.given.join(' ') : ''
         return `${given} ${first.family || first.text || ''}`.trim()
       }
+      // FHIR AllergyIntolerance reaction: [{ manifestation:[CodeableConcept], severity }]
+      if (Array.isArray(first.manifestation) && first.manifestation[0]) {
+        return resolveValue(first.manifestation[0])
+      }
       // FHIR CodeableConcept inside an array: { coding[], text }
       if (first.text) return first.text
       if (first.display) return first.display
       if (Array.isArray(first.coding) && first.coding[0]) {
-        return first.coding[0].code || first.coding[0].display || undefined
+        return first.coding[0].display || first.coding[0].code || undefined
       }
     }
     return String(first)
@@ -158,7 +173,7 @@ function resolveValue(val) {
   if (typeof val === 'object') {
     if (val.text) return val.text
     if (Array.isArray(val.coding) && val.coding[0]) {
-      return val.coding[0].code || val.coding[0].display || undefined
+      return val.coding[0].display || val.coding[0].code || undefined
     }
     // FHIR Reference: { reference: "Patient/123" } → "123"
     if (typeof val.reference === 'string') {
@@ -176,6 +191,7 @@ const REQUIRED_DEFAULTS = {
   conditions: { clinical_status: 'active' },
   problems:   { clinical_status: 'active' },
   allergies:  { status: 'active' },
+  allergy:    { status: 'active' },
   medications:{ status: 'active' },
 }
 

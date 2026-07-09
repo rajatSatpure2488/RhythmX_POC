@@ -13,9 +13,10 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Optional
 
-import requests
+import httpx
 
 from app.core import config
+from app.core.http_client import HTTPClientManager
 
 log = logging.getLogger("medisync.api_request_client")
 
@@ -154,9 +155,21 @@ def prepare_payload(
     return prepared
 
 
+def _path_variants(path: str) -> list[str]:
+    dot_path = re.sub(r"\[(\d+)\]", r".\1", path)
+    bracket_path = re.sub(r"\.(\d+)(?=\.|$)", r"[\1]", dot_path)
+    variants = [path, dot_path, bracket_path]
+    return list(dict.fromkeys(variants))
+
+
 def _value_from_path(record: Any, path: str) -> Any:
+    if isinstance(record, dict):
+        for key in _path_variants(path):
+            if key in record:
+                return record.get(key)
     current: Any = record
-    for part in path.split("."):
+    normalized_path = re.sub(r"\[(\d+)\]", r".\1", path)
+    for part in normalized_path.split("."):
         if isinstance(current, dict):
             current = current.get(part)
         elif isinstance(current, list):
@@ -266,6 +279,10 @@ def _code_system_display(value: Any) -> str:
     raw = str(value or "").strip()
     if not raw or raw.lower() == "uncoded":
         return ""
+    if raw == "http://snomed.info/sct":
+        return "SNOMED CT"
+    if raw == "http://www.nlm.nih.gov/research/umls/rxnorm":
+        return "RxNorm"
     key = re.sub(r"[\s\-_]", "", raw).upper()
     return {
         "SNOMEDCT": "SNOMED CT",
@@ -276,6 +293,52 @@ def _code_system_display(value: Any) -> str:
         "ICD9CM": "ICD-9-CM",
         "LOINC": "LOINC",
     }.get(key, raw)
+
+
+def _codeable_system(value: Any) -> str:
+    if isinstance(value, dict):
+        coding = value.get("coding") or []
+        if isinstance(coding, list) and coding:
+            first = coding[0]
+            if isinstance(first, dict):
+                return str(first.get("system") or "").strip()
+    return ""
+
+
+def _active_status(value: Any) -> str:
+    raw = _codeable_code(value) or _value_to_text(value) or str(value or "")
+    return "active" if str(raw).strip().lower() in (
+        "active", "completed", "intended", "confirmed", "final"
+    ) else "inactive"
+
+
+def _verification_status(value: Any) -> str:
+    return str(_codeable_code(value) or _value_to_text(value) or value or "").strip().lower()
+
+
+def _allergy_reaction(value: Any) -> str:
+    if isinstance(value, list) and value:
+        first = value[0] or {}
+        if isinstance(first, dict):
+            manifestation = first.get("manifestation") or []
+            if isinstance(manifestation, list) and manifestation:
+                return _value_to_text(manifestation[0])
+            return _value_to_text(first)
+    return _value_to_text(value)
+
+
+def _allergy_rxnorm(record: dict[str, Any]) -> str:
+    explicit = _first_configured_value(record, ["rxnorm", "rxnorm_code"], None)
+    if explicit not in (None, "", [], {}):
+        return str(explicit).strip()
+    code_value = record.get("code")
+    system = _code_system_display(
+        _first_configured_value(record, ["code_vocab", "code_system", "allergen_code_system", "code.coding.0.system"], None)
+        or _codeable_system(code_value)
+    )
+    if system == "RxNorm":
+        return _codeable_code(code_value)
+    return ""
 
 
 def _first_from_sources(record: dict[str, Any], sources: list[Any], context: Optional[dict[str, Any]]) -> Any:
@@ -297,17 +360,25 @@ def _custom_fields(record: dict[str, Any], mappings: list[dict[str, Any]], conte
 def _allergy_notes(record: dict[str, Any]) -> str:
     description = _value_to_text(_first_from_sources(
         record,
-        ["description", "name", "name_full", "name_short", "substance", "allergen", "allergen_text", "allergy_name", "code.text"],
+        [
+            "description", "name", "name_full", "name_short", "substance",
+            "allergen", "allergen_text", "allergy_name", "code.text",
+            "code.coding.0.display", "code.coding.0.code",
+        ],
         None,
     ))
-    reaction = _value_to_text(_first_from_sources(record, ["reaction", "reaction_manifestation", "reaction_text", "manifestation"], None))
+    reaction = _allergy_reaction(_first_from_sources(
+        record,
+        ["reaction_manifestation", "reaction_text", "manifestation", "reaction_code", "reaction.0.manifestation.0", "reaction"],
+        None,
+    ))
     explicit = _value_to_text(_first_from_sources(record, ["allergy_note", "notes", "note"], None))
     lines: list[str] = []
     if explicit:
         lines.append(f"Allergy Note: {explicit}")
     elif description and reaction:
         lines.append(f"Allergy Note: Patient reports allergic reaction to {description} resulting in {reaction.lower()}.")
-    severity = _value_to_text(_first_from_sources(record, ["reaction_severity", "severity", "severity_text"], None))
+    severity = _value_to_text(_first_from_sources(record, ["reaction_severity", "severity", "severity_text", "reaction.0.severity"], None))
     if severity and severity.lower() not in ("uncoded", "unknown"):
         lines.append(f"Severity: {severity}")
     criticality = _value_to_text(_first_from_sources(record, ["allergy_criticality", "criticality"], None))
@@ -328,7 +399,7 @@ def _allergy_notes(record: dict[str, Any]) -> str:
     code = _codeable_code(_first_from_sources(record, ["code", "allergen_code"], None))
     if code and code.lower() != "uncoded":
         lines.append(f"Code: {code}")
-        code_system = _code_system_display(_first_from_sources(record, ["code_vocab", "code_system", "allergen_code_system"], None))
+        code_system = _code_system_display(_first_from_sources(record, ["code_vocab", "code_system", "allergen_code_system", "code.coding.0.system"], None) or _codeable_system(_first_from_sources(record, ["code"], None)))
         if code_system:
             lines.append(f"Code System: {code_system}")
     lines.append("Source: RhythmX AI Import")
@@ -399,14 +470,20 @@ def _transform_value(
         return str(value).strip().lower()
     if transform == "appointment_status":
         return _appointment_status(value)
+    if transform == "allergy_reaction":
+        return _allergy_reaction(value)
+    if transform == "allergy_rxnorm":
+        return _allergy_rxnorm(record or {})
+    if transform == "verification_status":
+        return _verification_status(value)
+    if transform == "code_system":
+        return _code_system_display(value)
     if transform == "custom_fields":
         return _custom_fields(record or {}, (rule or {}).get("mappings", []), context)
     if transform == "allergy_notes":
         return _allergy_notes(record or {})
     if transform == "active_status":
-        return "active" if str(value).strip().lower() in (
-            "active", "completed", "intended", "confirmed", "final"
-        ) else "inactive"
+        return _active_status(value)
     if transform == "gender":
         raw = str(value).strip().lower()
         return {
@@ -467,7 +544,7 @@ def call_configured_api(
     data: Optional[dict[str, Any]] = None,
     files: Optional[dict[str, Any]] = None,
     timeout: Optional[int] = None,
-) -> requests.Response:
+) -> httpx.Response:
     """Call an EMR API using api_requests.json settings.
 
     Args:
@@ -512,10 +589,10 @@ def call_configured_api(
         )
 
     log.info("%s %s via api_requests.json emr=%s api=%s", method, url, get_emr_name(), api_cfg["name"])
-    return requests.request(method, url, **request_kwargs)
+    return HTTPClientManager.get_http_client().request(method, url, **request_kwargs)
 
 
-def format_api_error(response: requests.Response) -> str:
+def format_api_error(response: httpx.Response) -> str:
     """Return a compact EMR error string from a response body."""
     error_detail = response.text[:1000]
     try:

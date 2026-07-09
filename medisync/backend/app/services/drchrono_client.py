@@ -1,14 +1,15 @@
 """
 MediSync — DrChrono HTTP Client
-Synchronous wrapper using requests (proven pattern from reference integration).
+Synchronous wrapper using the shared HTTPX client.
 Handles token exchange, refresh, and user/doctor profile fetching.
 """
 
-import requests
+import httpx
 from typing import Any, Dict, Optional
 from fastapi import HTTPException
 
 from app.core import config
+from app.core.http_client import HTTPClientManager
 
 
 class DrChronoClient:
@@ -55,7 +56,7 @@ class DrChronoClient:
         }
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
 
-        response = requests.post(
+        response = HTTPClientManager.get_http_client().post(
             config.DRCHRONO_TOKEN_URL,
             data=payload,
             headers=headers,
@@ -90,13 +91,13 @@ class DrChronoClient:
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
 
         try:
-            response = requests.post(
+            response = HTTPClientManager.get_http_client().post(
                 config.DRCHRONO_TOKEN_URL,
                 data=payload,
                 headers=headers,
                 timeout=30,
             )
-        except requests.RequestException as e:
+        except httpx.RequestError as e:
             # Network / connection problem reaching DrChrono — never bubble up as 500.
             raise HTTPException(
                 status_code=502,
@@ -138,7 +139,7 @@ class DrChronoClient:
         }
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
 
-        response = requests.post(
+        response = HTTPClientManager.get_http_client().post(
             config.DRCHRONO_TOKEN_URL,
             data=payload,
             headers=headers,
@@ -150,7 +151,7 @@ class DrChronoClient:
 
     def get_current_user(self, access_token: str) -> Dict:
         """Fetch the currently authenticated user profile."""
-        response = requests.get(
+        response = HTTPClientManager.get_http_client().get(
             f"{config.DRCHRONO_API_BASE}users/current",
             headers=self._api_headers(access_token),
             timeout=30,
@@ -164,7 +165,7 @@ class DrChronoClient:
 
     def get_doctor_profile(self, access_token: str, user_id: str) -> Optional[Dict]:
         """Fetch the doctor profile linked to a user ID."""
-        response = requests.get(
+        response = HTTPClientManager.get_http_client().get(
             f"{config.DRCHRONO_API_BASE}doctors",
             headers=self._api_headers(access_token),
             params={"user": user_id},
@@ -187,7 +188,7 @@ class DrChronoClient:
         if search:
             params["search"] = search
 
-        response = requests.get(
+        response = HTTPClientManager.get_http_client().get(
             f"{config.DRCHRONO_API_BASE}patients",
             headers=self._api_headers(access_token),
             params=params,
@@ -198,7 +199,7 @@ class DrChronoClient:
 
     def get_patient_by_id(self, access_token: str, patient_id: str) -> Dict:
         """Get a single patient by ID."""
-        response = requests.get(
+        response = HTTPClientManager.get_http_client().get(
             f"{config.DRCHRONO_API_BASE}patients/{patient_id}",
             headers=self._api_headers(access_token),
             timeout=30,

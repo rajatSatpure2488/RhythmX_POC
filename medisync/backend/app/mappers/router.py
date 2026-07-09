@@ -1,11 +1,11 @@
 """
-mapper_router.py — FastAPI endpoints for the FHIR R5 → DrChrono mapper layer.
+mapper_router.py — FastAPI endpoints for the config-driven EMR mapper layer.
 
 Endpoints:
-  GET  /mapper/status                — List all 18 mappers + DrChrono endpoints
-  POST /mapper/transform/{type}      — Transform a FHIR R5 resource → DrChrono payload
+  GET  /mapper/status                — List configured EMR API mappings
+  POST /mapper/transform/{type}      — Transform a source resource → EMR payload
   POST /mapper/transform-batch       — Transform multiple resources at once
-  GET  /mapper/prerequisites         — Resolve ALL prerequisite IDs from DrChrono
+  GET  /mapper/prerequisites         — Resolve ALL prerequisite IDs from EMR
   GET  /mapper/prerequisites/doctor  — Resolve doctor_id only
   GET  /mapper/prerequisites/office  — Resolve office_id only
   GET  /mapper/prerequisites/field-types       — Resolve clinical note field types
@@ -42,10 +42,10 @@ class BatchTransformRequest(BaseModel):
 
 @router.get("/status")
 async def mapper_status():
-    """List all supported FHIR R5 → DrChrono mappers."""
+    """List all supported config-driven EMR mappers."""
     return {
-        "module": "rule_based_mapper",
-        "description": "FHIR R5 → DrChrono API Mapper",
+        "module": "config_based_mapper",
+        "description": "Configuration-driven EMR API Mapper",
         "total_mappers": len(MAPPER_REGISTRY),
         "mappers": list_supported(),
     }
@@ -57,10 +57,10 @@ async def mapper_status():
 
 @router.post("/transform/{resource_type}")
 async def transform_resource(resource_type: str, req: TransformRequest):
-    """Transform a single FHIR R5 resource → DrChrono payload.
+    """Transform a single source resource → EMR payload.
 
     Path param:
-        resource_type: FHIR R5 resourceType (e.g. Patient, MedicationRequest)
+        resource_type: configured resource name or alias (e.g. Patient, medication)
 
     Body:
         fhir_resource: The FHIR R5 JSON body.
@@ -81,11 +81,11 @@ async def transform_resource(resource_type: str, req: TransformRequest):
 
 @router.post("/transform-batch")
 async def transform_batch(req: BatchTransformRequest):
-    """Transform multiple FHIR R5 resources at once.
+    """Transform multiple source resources at once.
 
     Each resource must have a 'resourceType' field.
     If auto_resolve=true (default) and no context is provided,
-    prerequisites will be automatically resolved from DrChrono.
+    prerequisites will be automatically resolved from the configured EMR.
     """
     ctx = req.context or {}
 
@@ -108,7 +108,7 @@ async def transform_batch(req: BatchTransformRequest):
             results.append({
                 "success": False,
                 "resource_type": rtype or "Unknown",
-                "drchrono_endpoint": "",
+                "emr_endpoint": "",
                 "payload": {},
                 "errors": [f"No mapper for '{rtype}'"],
                 "warnings": [],
@@ -132,13 +132,13 @@ async def transform_batch(req: BatchTransformRequest):
 
 @router.get("/prerequisites", summary="Resolve ALL prerequisite IDs")
 async def get_all_prerequisites():
-    """Resolve all runtime prerequisite IDs from DrChrono in a single call.
+    """Resolve all runtime prerequisite IDs from the configured EMR in a single call.
 
     Returns a context dict with doctor_id, office_id, field_type_id,
     vaccine_inventory_id, sublab_id, and task_category_id — ready to pass
     into transform endpoints.
 
-    Requires: Active DrChrono OAuth session.
+    Requires: active EMR OAuth session.
     """
     from app.services.prerequisite_resolver import resolve_all
     return resolve_all()

@@ -1,81 +1,119 @@
-"""
-MediSync Rule-Based Mapper Registry
-====================================
-Maps all 18 FHIR R5 resources → DrChrono API payloads.
+"""Config-backed EMR mapper registry.
 
-Usage:
-    from app.mappers import MAPPER_REGISTRY, get_mapper
-
-    mapper = get_mapper("Patient")
-    result = mapper.transform(fhir_resource, context={"doctor_id": 1234})
+Static mapper classes were replaced by api_requests.json. This module keeps the
+old registry helpers available for routes that still import app.mappers, but all
+payload mapping now comes from configuration.
 """
 from __future__ import annotations
+
+from dataclasses import dataclass, field
 from typing import Any, Optional
 
-from .base_mapper import BaseRuleMapper, MapperResult
-from .patient_mapper import PatientMapper
-from .medication_mapper import MedicationMapper
-from .allergy_mapper import AllergyMapper
-from .condition_mapper import ConditionMapper
-from .observation_mapper import ObservationMapper
-from .observation_note_mapper import ObservationNoteMapper
-from .encounter_mapper import EncounterMapper
-from .document_reference_mapper import DocumentReferenceMapper
-from .clinical_note_mapper import ClinicalNoteMapper
-from .coverage_mapper import CoverageMapper
-from .service_request_mapper import ServiceRequestMapper
-from .immunization_mapper import ImmunizationMapper
-from .diagnostic_report_mapper import DiagnosticReportMapper
-from .practitioner_mapper import PractitionerMapper
-from .procedure_mapper import ProcedureMapper
-from .care_plan_mapper import CarePlanMapper
-from .care_team_mapper import CareTeamMapper
-from .appointment_mapper import AppointmentMapper
-
-# ── Registry: FHIR resourceType → Mapper instance ────────────
-MAPPER_REGISTRY: dict[str, BaseRuleMapper] = {
-    "Patient": PatientMapper(),
-    "MedicationRequest": MedicationMapper(),
-    "AllergyIntolerance": AllergyMapper(),
-    "Condition": ConditionMapper(),
-    "Observation": ObservationMapper(),
-    "ObservationNote": ObservationNoteMapper(),
-    "Encounter": EncounterMapper(),
-    "DocumentReference": DocumentReferenceMapper(),
-    "ClinicalNote": ClinicalNoteMapper(),
-    "Coverage": CoverageMapper(),
-    "ServiceRequest": ServiceRequestMapper(),
-    "Immunization": ImmunizationMapper(),
-    "DiagnosticReport": DiagnosticReportMapper(),
-    "Practitioner": PractitionerMapper(),
-    "Procedure": ProcedureMapper(),
-    "CarePlan": CarePlanMapper(),
-    "CareTeam": CareTeamMapper(),
-    "Appointment": AppointmentMapper(),
-}
+from app.services.api_request_client import (
+    ApiRequestConfigError,
+    build_payload_from_record,
+    get_emr_name,
+    list_configured_api_requests,
+)
 
 
-def get_mapper(resource_type: str) -> Optional[BaseRuleMapper]:
-    """Get the mapper for a given FHIR resourceType."""
-    return MAPPER_REGISTRY.get(resource_type)
+@dataclass
+class MapperResult:
+    success: bool
+    resource_type: str
+    emr_endpoint: str
+    payload: dict[str, Any]
+    errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "success": self.success,
+            "resource_type": self.resource_type,
+            "emr_endpoint": self.emr_endpoint,
+            "payload": self.payload,
+            "errors": self.errors,
+            "warnings": self.warnings,
+        }
+
+
+class ConfiguredApiMapper:
+    def __init__(self, api_cfg: dict[str, Any]):
+        self.api_name = str(api_cfg["name"])
+        self.resource_type = self.api_name
+        self.aliases = [str(alias) for alias in api_cfg.get("aliases", [])]
+        self.emr_endpoint = str(api_cfg.get("path", "")).lstrip("/")
+        payload_cfg = api_cfg.get("payload", {})
+        self.required_fields = list(payload_cfg.get("required_fields", []))
+
+    def transform(
+        self,
+        source_record: dict[str, Any],
+        context: Optional[dict[str, Any]] = None,
+    ) -> MapperResult:
+        try:
+            payload = build_payload_from_record(
+                self.api_name,
+                source_record,
+                context=context,
+                validate_required=False,
+            )
+            return MapperResult(
+                success=True,
+                resource_type=self.resource_type,
+                emr_endpoint=self.emr_endpoint,
+                payload=payload,
+            )
+        except ApiRequestConfigError as exc:
+            return MapperResult(
+                success=False,
+                resource_type=self.resource_type,
+                emr_endpoint=self.emr_endpoint,
+                payload={},
+                errors=[str(exc)],
+            )
+
+
+def _build_registry() -> tuple[dict[str, ConfiguredApiMapper], dict[str, ConfiguredApiMapper]]:
+    registry: dict[str, ConfiguredApiMapper] = {}
+    lookup: dict[str, ConfiguredApiMapper] = {}
+
+    for api_cfg in list_configured_api_requests():
+        mapper = ConfiguredApiMapper(api_cfg)
+        registry[mapper.api_name] = mapper
+        for name in [mapper.api_name, *mapper.aliases]:
+            lookup[str(name)] = mapper
+            lookup.setdefault(str(name).lower(), mapper)
+
+    return registry, lookup
+
+
+MAPPER_REGISTRY, _MAPPER_LOOKUP = _build_registry()
+
+
+def get_mapper(resource_type: str) -> Optional[ConfiguredApiMapper]:
+    key = str(resource_type or "")
+    return _MAPPER_LOOKUP.get(key) or _MAPPER_LOOKUP.get(key.lower())
 
 
 def list_supported() -> list[dict[str, Any]]:
-    """List all supported resource types and their DrChrono endpoints."""
+    emr_name = get_emr_name()
     return [
         {
-            "fhir_type": name,
-            "drchrono_endpoint": mapper.drchrono_endpoint,
+            "resource": mapper.resource_type,
+            "aliases": mapper.aliases,
+            "emr": emr_name,
+            "emr_endpoint": mapper.emr_endpoint,
             "required_fields": mapper.required_fields,
         }
-        for name, mapper in MAPPER_REGISTRY.items()
+        for mapper in MAPPER_REGISTRY.values()
     ]
 
 
 __all__ = [
     "MAPPER_REGISTRY",
+    "MapperResult",
+    "ConfiguredApiMapper",
     "get_mapper",
     "list_supported",
-    "BaseRuleMapper",
-    "MapperResult",
 ]

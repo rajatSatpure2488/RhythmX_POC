@@ -13,6 +13,8 @@ from typing import Any, Optional
 from fastapi import APIRouter
 from pydantic import BaseModel
 
+from app.core.http_client import HTTPClientManager
+
 log = logging.getLogger("medisync.ai_explain")
 router = APIRouter()
 
@@ -332,7 +334,6 @@ async def _try_llm_enhance(base: ExplainResponse, context_str: str) -> ExplainRe
         return base
 
     try:
-        import httpx
         prompt = (
             f"You are a DrChrono EHR integration expert. A developer encountered these errors:\n\n"
             f"Context: {context_str}\n"
@@ -341,18 +342,19 @@ async def _try_llm_enhance(base: ExplainResponse, context_str: str) -> ExplainRe
             f"In 2 sentences max, provide one additional expert tip that goes beyond the basic fix. "
             f"Focus on prevention. Be specific to DrChrono API v4. Do not repeat what was already said."
         )
-        async with httpx.AsyncClient(timeout=8) as client:
-            resp = await client.post(
-                f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}",
-                json={"contents": [{"parts": [{"text": prompt}]}]},
-            )
-            if resp.status_code == 200:
-                text = resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-                base.suggestions.append(Suggestion(
-                    field="💡 AI Expert Tip",
-                    action="fix",
-                    reason=text,
-                ))
+        client = await HTTPClientManager.get_async_http_client()
+        resp = await client.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}",
+            json={"contents": [{"parts": [{"text": prompt}]}]},
+            timeout=8,
+        )
+        if resp.status_code == 200:
+            text = resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+            base.suggestions.append(Suggestion(
+                field="💡 AI Expert Tip",
+                action="fix",
+                reason=text,
+            ))
     except Exception as e:
         log.debug(f"LLM enhance skipped: {e}")
 

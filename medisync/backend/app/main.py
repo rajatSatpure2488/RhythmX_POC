@@ -11,7 +11,8 @@ from app.core import config
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routes import auth, upload, mapping, dryrun, push, ai_explain, drchrono, fhir_proxy, logs
+from app.core.http_client import HTTPClientManager
+from app.routes import auth, upload, mapping, dryrun, push, ai_explain, drchrono, logs
 
 # # ── FHIR Pipeline (independent module — delete this block to remove) ──
 # try:
@@ -30,12 +31,19 @@ from app.routes import auth, upload, mapping, dryrun, push, ai_explain, drchrono
 #     _FHIR_R5_AVAILABLE = False
 
 # ── Rule-Based Mapper (FHIR R5 → DrChrono — delete this block to remove) ──
-try:
-    from app.mappers.router import router as mapper_router
-    _MAPPER_AVAILABLE = True
-except ImportError:
-    mapper_router = None
-    _MAPPER_AVAILABLE = False
+# try:
+#     from app.mappers.router import router as mapper_router
+#     _MAPPER_AVAILABLE = True
+# except ImportError:
+#     mapper_router = None
+#     _MAPPER_AVAILABLE = False
+
+# try:
+#     from app.routes.fhir_proxy import router as fhir_proxy_router
+#     _FHIR_PROXY_AVAILABLE = True
+# except ImportError:
+#     fhir_proxy_router = None
+#     _FHIR_PROXY_AVAILABLE = False
 
 app = FastAPI(
     title="MediSync API",
@@ -71,8 +79,10 @@ app.include_router(dryrun.router,  prefix="/dryrun",  tags=["DryRun"])
 app.include_router(push.router,       prefix="/push",    tags=["Push"])
 app.include_router(ai_explain.router, prefix="/ai",      tags=["AI Assistant"])
 app.include_router(drchrono.router,   prefix="/drchrono", tags=["DrChrono Resources"])
-app.include_router(fhir_proxy.router, prefix="/fhir-proxy", tags=["FHIR Proxy"])
 app.include_router(logs.router,       prefix="/logs",     tags=["Logs"])
+
+# if _FHIR_PROXY_AVAILABLE and fhir_proxy_router is not None:
+#     app.include_router(fhir_proxy_router, prefix="/fhir-proxy", tags=["FHIR Proxy"])
 
 # # ── FHIR Pipeline (independent — remove this line to disconnect) ──
 # if _PIPELINE_AVAILABLE and pipeline_router is not None:
@@ -83,8 +93,8 @@ app.include_router(logs.router,       prefix="/logs",     tags=["Logs"])
 #     app.include_router(fhir_r5_router, prefix="/fhir-r5", tags=["FHIR R5"])
 
 # ── Rule-Based Mapper (independent — remove this line to disconnect) ──
-if _MAPPER_AVAILABLE and mapper_router is not None:
-    app.include_router(mapper_router, prefix="/mapper", tags=["Mapper"])
+# if _MAPPER_AVAILABLE and mapper_router is not None:
+#     app.include_router(mapper_router, prefix="/mapper", tags=["Mapper"])
 
 @app.on_event("startup")
 async def startup_event():
@@ -96,6 +106,12 @@ async def startup_event():
         logging.getLogger("medisync").warning(
             f"[startup] Missing DrChrono credentials — running in dev/demo mode. {e}"
         )
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Close shared outbound HTTP connections."""
+    await HTTPClientManager.close_all()
 
 
 @app.get("/", tags=["Health"])

@@ -5,8 +5,13 @@ Fully dynamic: validates whatever resource keys exist in the session.
 """
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 from app.routes.upload import _SESSION
+from app.services.api_request_client import (
+    ApiRequestConfigError,
+    _first_configured_value,
+    get_api_request,
+)
 
 router = APIRouter()
 
@@ -17,9 +22,43 @@ REQUIRED_FIELDS = {
     "conditions":     ["icd_code"],
     "medications":    ["drug_name"],
     "observations":   ["value"],
-    "allergies":      ["allergen"],
+    "allergies":      ["description"],
+    "allergy":        ["description"],
     "immunizations":  ["vaccine"],
     "clinical_notes": ["note_text"],
+}
+
+FIELD_ALIASES = {
+    "description": [
+        "description",
+        "name",
+        "name_full",
+        "name_short",
+        "name_rx",
+        "substance",
+        "substance_name",
+        "substance_display",
+        "allergen",
+        "allergen_text",
+        "allergy_name",
+        "allergen_name",
+        "allergen_description",
+        "allergen_display",
+        "code.text",
+        "code.display",
+        "code.coding.0.display",
+        "code.coding.0.code",
+        "code_text",
+        "code_display",
+        "code_description",
+        "code_coding_display",
+        "code_coding_code",
+        "rxnorm",
+        "rxnorm_code",
+        "snomed",
+        "snomed_code",
+        "code",
+    ],
 }
 
 
@@ -28,11 +67,41 @@ class DryRunRequest(BaseModel):
     resources: List[str] = []
 
 
-def _validate_record(record: dict, required: List[str]) -> List[str]:
+def _rule_sources(rule) -> List:
+    if isinstance(rule, list):
+        return rule
+    if isinstance(rule, dict):
+        return rule.get("sources", [])
+    return []
+
+
+def _required_from_config(resource_key: str) -> tuple[List[str], dict]:
+    """Return required fields and field source rules from api_requests.json."""
+    try:
+        payload_cfg = get_api_request(resource_key).get("payload", {})
+    except ApiRequestConfigError:
+        return REQUIRED_FIELDS.get(resource_key, []), {}
+
+    field_sources = payload_cfg.get("field_sources", {})
+    required = []
+    for field in payload_cfg.get("required_fields", []):
+        sources = _rule_sources(field_sources.get(field, []))
+        if sources and all(isinstance(src, str) and src.startswith("$context.") for src in sources):
+            continue
+        required.append(field)
+    return required, field_sources
+
+
+def _validate_record(record: dict, required: List[str], field_sources: Optional[dict] = None) -> List[str]:
     """Return list of missing/null required fields."""
     errors = []
+    field_sources = field_sources or {}
     for field in required:
-        val = record.get(field)
+        sources = [
+            *_rule_sources(field_sources.get(field, [])),
+            *FIELD_ALIASES.get(field, [field]),
+        ]
+        val = _first_configured_value(record, sources, None)
         if val is None or val == "" or val == []:
             errors.append(f"Missing required field: '{field}'")
     return errors
@@ -55,7 +124,7 @@ async def run_dryrun(req: DryRunRequest):
 
     for key in target_keys:
         records  = source.get(key, [])
-        required = REQUIRED_FIELDS.get(key, [])  # empty list = no required checks
+        required, field_sources = _required_from_config(key)  # empty list = no required checks
 
         if not records:
             details[key] = {"rate": 100, "errors": [], "count": 0}
@@ -64,7 +133,7 @@ async def run_dryrun(req: DryRunRequest):
         record_errors = []
         ok_count = 0
         for r in records:
-            errs = _validate_record(r, required)
+            errs = _validate_record(r, required, field_sources)
             if errs:
                 record_errors.extend(errs[:2])  # cap per record
             else:

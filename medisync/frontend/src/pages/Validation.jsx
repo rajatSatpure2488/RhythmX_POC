@@ -35,7 +35,8 @@ const DRCHRONO_ENDPOINTS = {
   problems:             { method:'POST',  path:'/api/problems',                     note:'Requires patient_id' },
   encounters:           { method:'POST',  path:'/api/appointments',                 note:'Requires doctor_id + patient_id' },
   observations:         { method:'POST',  path:'/api/patient_lab_results',          note:'Structured lab result per observation (joined with notes)' },
-  allergies:            { method:'POST',  path:'/api/allergies',                    note:'Requires patient_id' },
+  allergies:            { method:'POST',  path:'/api/allergies',                    note:'Requires allergy description; patient and doctor are resolved at push time' },
+  allergy:              { method:'POST',  path:'/api/allergies',                    note:'Requires allergy description; patient and doctor are resolved at push time' },
   immunizations:        { method:'POST',  path:'/api/patient_vaccine_records',      note:'Requires patient_id' },
   procedures:           { method:'POST',  path:'/api/procedures',                  note:'Requires patient_id' },
   documents:            { method:'POST',  path:'/api/documents',                   note:'Multipart file upload (PDF, JPG, etc.)' },
@@ -54,7 +55,8 @@ const REQUIRED = {
   problems:             ['code','status','patient_id'],
   encounters:           ['date'],   // pushed as appointments; date = scheduled_time
   observations:         ['patient_id'],   // labs (value) or pivoted vitals; share patient link
-  allergies:            ['substance','status','patient_id'],
+  allergies:            ['description'],
+  allergy:              ['description'],
   immunizations:        ['vaccine_code','date','patient_id'],
   procedures:           ['code','performed_date','patient_id'],
   patient:              ['name','birth_date','gender'],
@@ -77,6 +79,8 @@ const TROUBLESHOOT = {
     encounters: `1. 'type', 'date', 'patient_id' are required.\n2. Dates must be in YYYY-MM-DD format.\n3. patient_id must match a created patient in DrChrono.`,
     documents:  `1. Each document row must have 'patient' (patient_id), 'description', and 'document' (base64 or file path).\n2. DrChrono /api/documents uses multipart upload — the file content is required.\n3. Supported file types: PDF, JPEG, PNG, TIFF.\n4. If using FHIR DocumentReference, ensure content[0].attachment.data has the base64 content.`,
     document_reference: `1. FHIR DocumentReference must have content[0].attachment.data (base64 encoded).\n2. Also needs subject.reference or _drchrono_patient_id.\n3. The attachment.contentType determines the upload MIME type.`,
+    allergies: `1. Allergy rows need an allergy description from description, substance, allergen, allergy_name, or FHIR code.text/coding.display.\n2. Status defaults to active during push if missing.\n3. Patient and doctor IDs are resolved from context during push, so they are not required in the uploaded allergy CSV.`,
+    allergy: `1. Allergy rows need an allergy description from description, substance, allergen, allergy_name, or FHIR code.text/coding.display.\n2. Status defaults to active during push if missing.\n3. Patient and doctor IDs are resolved from context during push, so they are not required in the uploaded allergy CSV.`,
     default:    `1. Fill all required fields in the source CSV.\n2. Check column names match expected FHIR field names.\n3. Re-upload the corrected file in Stage 2 (Ingestion).`,
   },
   date_format: {
@@ -102,7 +106,18 @@ const FIELD_ALIASES = {
   'patientid':    ['patientid', 'patient', 'memberid'],
   'patient':      ['patient', 'patientid', 'memberid'],
   'document':     ['document', 'filepath', 'filename', 'localpath', 'documentpath', 'filecontent', 'data', 'attachmentdata'],
-  'description':  ['description', 'name', 'namefull', 'title', 'label'],
+  'description':  [
+    'description', 'name', 'namefull', 'nameshort', 'namerx', 'title', 'label',
+    'substance', 'substancename', 'substancedisplay',
+    'allergen', 'allergentext', 'allergyname', 'allergenname', 'allergendescription', 'allergendisplay',
+    'code', 'codetext', 'codedisplay', 'codedescription', 'codecodingdisplay', 'codecodingcode',
+    'rxnorm', 'rxnormcode', 'snomed', 'snomedcode',
+  ],
+  'reaction':     ['reaction', 'reactionmanifestation', 'reactiontext', 'reactioncode', 'manifestation'],
+  'verificationstatus': ['verificationstatus', 'verificationstatuscode'],
+  'rxnorm':       ['rxnorm', 'rxnormcode'],
+  'snomedreaction': ['snomedreaction'],
+  'snomedcode':   ['snomedcode'],
   'date':         ['date', 'scheduledtime', 'datereport', 'documentdate', 'effectivedt', 'appointmentdate'],
   'noteid':       ['noteid', 'sourcenoteid'],
   // Insurer name arrives as insurance_company (transformed) or payor_name (raw).
@@ -114,7 +129,76 @@ function normalizeKey(s) {
   return s
     .replace(/([a-z])([A-Z])/g, '$1$2')
     .toLowerCase()
-    .replace(/[_\s\-]/g, '')
+    .replace(/[_.\s\-]/g, '')
+}
+
+const RESOURCE_FIELD_SOURCES = {
+  allergies: {
+    description: [
+      'description', 'name', 'name_full', 'name_short', 'name_rx',
+      'substance', 'substance_name', 'substance_display',
+      'allergen', 'allergen_text', 'allergy_name', 'allergen_name', 'allergen_description', 'allergen_display',
+      'code.text', 'code.display', 'code.coding.0.display', 'code.coding.0.code', 'code.coding[0].display', 'code.coding[0].code',
+      'code_text', 'code_display', 'code_description', 'code_coding_display', 'code_coding_code',
+      'rxnorm', 'rxnorm_code', 'snomed', 'snomed_code',
+      'code',
+    ],
+  },
+  allergy: {
+    description: [
+      'description', 'name', 'name_full', 'name_short', 'name_rx',
+      'substance', 'substance_name', 'substance_display',
+      'allergen', 'allergen_text', 'allergy_name', 'allergen_name', 'allergen_description', 'allergen_display',
+      'code.text', 'code.display', 'code.coding.0.display', 'code.coding.0.code', 'code.coding[0].display', 'code.coding[0].code',
+      'code_text', 'code_display', 'code_description', 'code_coding_display', 'code_coding_code',
+      'rxnorm', 'rxnorm_code', 'snomed', 'snomed_code',
+      'code',
+    ],
+  },
+}
+
+function isPresent(val) {
+  return val !== null && val !== undefined && val !== '' && !(Array.isArray(val) && val.length === 0)
+}
+
+function getPathValue(obj, path) {
+  if (!obj || !path) return undefined
+  if (Object.prototype.hasOwnProperty.call(obj, path)) return obj[path]
+
+  const dotPath = String(path).replace(/\[(\d+)\]/g, '.$1')
+  const bracketPath = dotPath.replace(/\.(\d+)(?=\.|$)/g, '[$1]')
+  for (const key of [dotPath, bracketPath]) {
+    if (Object.prototype.hasOwnProperty.call(obj, key)) return obj[key]
+  }
+
+  let cur = obj
+  for (const part of dotPath.split('.')) {
+    if (cur === null || cur === undefined) return undefined
+    if (Array.isArray(cur)) {
+      const idx = Number(part)
+      if (!Number.isInteger(idx) || idx < 0 || idx >= cur.length) return undefined
+      cur = cur[idx]
+    } else if (typeof cur === 'object') {
+      cur = cur[part]
+    } else {
+      return undefined
+    }
+  }
+  return cur
+}
+
+function resolveConfiguredRequiredValue(rec, resourceKey, field) {
+  const sources = RESOURCE_FIELD_SOURCES[resourceKey]?.[field] || []
+  for (const source of sources) {
+    const rawVal = getPathValue(rec, source)
+    const val = resolveValue(rawVal)
+    if (isPresent(val)) return { value: val, source }
+  }
+  return { value: undefined, source: undefined }
+}
+
+function isAllergyResource(resourceKey) {
+  return resourceKey === 'allergies' || resourceKey === 'allergy'
 }
 
 // Unwrap FHIR complex types (HumanName arrays, CodeableConcept, etc.) to a display string
@@ -128,10 +212,27 @@ function resolveValue(val) {
         const given = Array.isArray(first.given) ? first.given.join(' ') : ''
         return `${given} ${first.family || first.text || ''}`.trim()
       }
+      if (Array.isArray(first.manifestation) && first.manifestation[0]) {
+        return resolveValue(first.manifestation[0])
+      }
       if (first.text)    return first.text
       if (first.display) return first.display
+      if (Array.isArray(first.coding) && first.coding[0]) {
+        return first.coding[0].display || first.coding[0].code || undefined
+      }
     }
     return String(first)
+  }
+  if (typeof val === 'object') {
+    if (val.text) return val.text
+    if (val.display) return val.display
+    if (Array.isArray(val.coding) && val.coding[0]) {
+      return val.coding[0].display || val.coding[0].code || undefined
+    }
+    if (typeof val.reference === 'string') {
+      const parts = val.reference.split('/')
+      return parts[parts.length - 1]
+    }
   }
   return val
 }
@@ -144,6 +245,7 @@ const REQUIRED_DEFAULTS = {
   conditions: { status: 'active' },
   problems:   { status: 'active' },
   allergies:  { status: 'active' },
+  allergy:    { status: 'active' },
   medications:{ status: 'active' },
 }
 
@@ -155,6 +257,9 @@ function auditRecord(rec, resourceKey) {
 
   for (const rf of reqFields) {
     const rfNorm = normalizeKey(rf)
+    const configured = resolveConfiguredRequiredValue(rec, resourceKey, rf)
+    if (isPresent(configured.value)) continue
+
     const aliases = FIELD_ALIASES[rfNorm] || [rfNorm]
     // Find source key whose normalized form matches the schema field OR any alias
     const matchKey = allFields.find(f => {
@@ -164,7 +269,7 @@ function auditRecord(rec, resourceKey) {
     })
     const rawVal = matchKey !== undefined ? rec[matchKey] : undefined
     const val = resolveValue(rawVal)  // unwrap FHIR arrays
-    if (val === null || val === undefined || val === '') {
+    if (!isPresent(val)) {
       if (defaults[rf] !== undefined) continue  // backend will fill this in
       errors.push({ field: matchKey || rf, type:'null_value', tag:'Null value', cls:'err-tag--null',
         detail:`Required field '${rf}' is null or missing.` })
@@ -198,6 +303,7 @@ function auditRecord(rec, resourceKey) {
 
   for (const f of allFields) {
     if (f.toLowerCase().includes('code') || f.toLowerCase().includes('icd')) {
+      if (isAllergyResource(resourceKey)) continue
       const val = String(rec[f] || '')
       if (val.length > 10 && /\s/.test(val)) {
         errors.push({ field: f, type:'terminology', tag:'Terminology', cls:'err-tag--term',
