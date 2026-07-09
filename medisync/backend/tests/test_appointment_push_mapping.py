@@ -165,4 +165,3 @@ def test_encounter_mapping_uses_same_enriched_appointment_fields_when_reason_mis
     assert {"field_type": 11473, "field_value": "Primary Care"} in payload["custom_fields"]
     assert {"field_type": 11474, "field_value": "Outpatient, consult"} in payload["custom_fields"]
     assert {"field_type": 11475, "field_value": "Dr. Ravi Agarwal"} in payload["custom_fields"]
-

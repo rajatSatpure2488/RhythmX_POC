@@ -144,7 +144,6 @@ class AllergyMapper(BaseRuleMapper):
             "reaction": reaction_text,
             "notes": self._notes(fhir, description, reaction_text, severity),
         }
-
         rxnorm = fhir.get("rxnorm")
         if not rxnorm and self._code_system(code_cc) == "RxNorm":
             rxnorm = self._code(code_cc)

@@ -218,6 +218,63 @@ def test_patient_mapping_minimum_record_still_succeeds():
     }
 
 
+def test_patient_csv_phone_maps_to_cell_phone_not_home_phone():
+    payload = _map_patient(
+        {
+            "first_name": "Cell",
+            "last_name": "Only",
+            "date_of_birth": "1990-01-01",
+            "gender": "female",
+            "phone": "555-7777",
+        },
+        doctor_id=1234,
+    )
+
+    assert payload["cell_phone"] == "555-7777"
+    assert "home_phone" not in payload
+
+
+def test_patient_blank_is_pregnant_is_not_sent_as_false():
+    payload = _map_patient(
+        {
+            "first_name": "Blank",
+            "last_name": "Pregnancy",
+            "date_of_birth": "1990-01-01",
+            "gender": "female",
+            "is_pregnant": "",
+        },
+        doctor_id=1234,
+    )
+
+    assert "is_pregnant" not in payload
+
+
+def test_patient_is_pregnant_maps_only_when_source_has_value():
+    yes_payload = _map_patient(
+        {
+            "first_name": "Yes",
+            "last_name": "Pregnancy",
+            "date_of_birth": "1990-01-01",
+            "gender": "female",
+            "is_pregnant": "yes",
+        },
+        doctor_id=1234,
+    )
+    no_payload = _map_patient(
+        {
+            "first_name": "No",
+            "last_name": "Pregnancy",
+            "date_of_birth": "1990-01-01",
+            "gender": "female",
+            "is_pregnant": "no",
+        },
+        doctor_id=1234,
+    )
+
+    assert yes_payload["is_pregnant"] is True
+    assert no_payload["is_pregnant"] is False
+
+
 class _FakeResponse:
     def __init__(self, status_code, body=None, text=""):
         self.status_code = status_code

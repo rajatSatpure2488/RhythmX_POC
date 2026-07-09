@@ -88,7 +88,7 @@ class AllergyMapper(BaseMapper):
             row.get("description") or row.get("name") or row.get("name_full")
             or row.get("allergen") or row.get("substance") or row.get("code", "")
         )
-        reaction = row.get("reaction") or row.get("manifestation", "")
+        reaction = row.get("reaction") or row.get("reaction_manifestation") or row.get("reaction_code") or row.get("manifestation", "")
         code = str(row.get("code") or "").strip()
         code_system = _code_system_display(row.get("code_vocab") or row.get("code_system"))
         payload = {

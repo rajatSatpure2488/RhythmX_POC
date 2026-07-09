@@ -184,13 +184,34 @@ def test_medication_mapping_matches_reference_payload_shape():
     assert payload["route"] == "Oral"
     assert payload["frequency"] == "Twice every 1 days"
     assert payload["indication"] == "Hypertension management"
-    assert payload["number_refills"] == 7
+    assert "number_refills" not in payload
     assert payload["dispense_quantity"] == 30
     assert payload["prn"] is False
     assert payload["daw"] is False
-    assert "signature_note" not in payload
-    assert payload["pharmacy_note"].startswith("Take 5 mg by mouth daily")
-    assert "Patient Instructions: Take 5 mg by mouth daily" in payload["notes"]
+    assert payload["signature_note"].startswith("Take 5 mg by mouth daily")
+    assert "pharmacy_note" not in payload
+    assert payload["notes"].startswith("Take 5 mg by mouth daily")
+    assert "Reason:" not in payload["notes"]
+    assert "Additional Instructions:" not in payload["notes"]
 
 
+def test_medication_blank_optional_text_fields_are_not_not_provided():
+    payload = _map_medication(
+        {
+            "name_full": "Aspirin 81 mg",
+            "sig": "Not Provided.",
+            "frequency": "8",
+            "pharmacy_note": "Not Provided.",
+            "dosageInstructionText": "Take 1 tablet by mouth daily.",
+        },
+        doctor_id=525460,
+        patient_id=134558544,
+    )
+
+    assert payload["name"] == "Aspirin 81 mg"
+    assert payload["signature_note"] == "Take 1 tablet by mouth daily."
+    assert "pharmacy_note" not in payload
+    assert "frequency" not in payload
+    assert "number_refills" not in payload
+    assert "notes" not in payload
 

@@ -1457,8 +1457,13 @@ def _map_patient(record: dict, doctor_id: Optional[int] = None) -> dict:
         "patient_payment_profile": _first_present(record, "patient_payment_profile", "payment_profile"),
         "patient_status": _first_present(record, "patient_status", "status"),
         "email": email or phones.get("email") or record.get("email", ""),
-        "home_phone": phone or phones.get("home_phone") or record.get("phone") or record.get("home_phone", ""),
-        "cell_phone": phones.get("cell_phone") or record.get("cell_phone") or record.get("mobile_phone"),
+        "home_phone": phone or phones.get("home_phone") or record.get("home_phone", ""),
+        "cell_phone": (
+            phones.get("cell_phone")
+            or record.get("cell_phone")
+            or record.get("mobile_phone")
+            or record.get("phone")
+        ),
         "office_phone": phones.get("office_phone") or record.get("office_phone") or record.get("work_phone"),
         "address": address or _first_present(record, "address", "address_street", "street"),
         "city": city or _first_present(record, "city", "address_city"),
@@ -1485,6 +1490,11 @@ def _map_patient(record: dict, doctor_id: Optional[int] = None) -> dict:
     disable_sms = _bool_value(_first_present(record, "disable_sms_messages", "disable_sms"))
     if disable_sms is not None:
         payload["disable_sms_messages"] = disable_sms
+
+    if any(k in record for k in ("is_pregnant", "pregnant")):
+        is_pregnant = _bool_value(_first_present(record, "is_pregnant", "pregnant"))
+        if is_pregnant is not None:
+            payload["is_pregnant"] = is_pregnant
 
     patient_flags = record.get("patient_flags")
     if isinstance(patient_flags, list) and patient_flags:
@@ -1744,7 +1754,8 @@ def _med_value(record: dict, *keys: str) -> str:
             value = first
     elif isinstance(value, dict):
         value = value.get("text") or _codeable_text(value)
-    return str(value).strip() if value not in (None, "", [], {}) else ""
+    text = str(value).strip() if value not in (None, "", [], {}) else ""
+    return "" if text.lower().rstrip(".") == "not provided" else text
 
 
 def _med_order_status(value: Any) -> str:
@@ -1789,20 +1800,27 @@ def _med_sentence(value: str) -> str:
     return str(value or "").strip().rstrip(". ")
 
 
+def _med_clean_text(value: Any) -> str:
+    text = str(value).strip() if value not in (None, "", [], {}) else ""
+    return "" if text.lower().rstrip(".") == "not provided" else text
+
+
+def _med_first_text(record: dict, *keys: str) -> str:
+    for key in keys:
+        value = record.get(key)
+        if isinstance(value, list) and value and isinstance(value[0], dict):
+            value = value[0].get("text") or _codeable_text(value[0])
+        elif isinstance(value, dict):
+            value = value.get("text") or _codeable_text(value)
+        text = _med_clean_text(value)
+        if text:
+            return text
+    return ""
+
+
 def _compose_med_notes(record: dict, indication: str, signature_note: str, pharmacy_note: str) -> str:
-    explicit = _med_value(record, "notes", "note")
-    if explicit:
-        return explicit
     patient_instruction = _med_value(record, "dosagePatientInstruction", "dosagepatientInstruction", "patient_instructions", "patient_instruction", "patientInstruction")
-    additional = _med_value(record, "dosageInstructionText", "additional_instructions", "additional_instruction", "additionalInstruction")
-    parts = []
-    if indication:
-        parts.append(f"Reason: {_med_sentence(indication)}.")
-    if patient_instruction or signature_note:
-        parts.append(f"Patient Instructions: {_med_sentence(patient_instruction or signature_note)}.")
-    if additional or pharmacy_note:
-        parts.append(f"Additional Instructions: {_med_sentence(additional or pharmacy_note)}.")
-    return " ".join(parts)
+    return _med_sentence(patient_instruction)
 
 
 def _map_medication(record: dict, doctor_id: Optional[int], patient_id: Optional[int]) -> dict:
@@ -1850,21 +1868,17 @@ def _map_medication(record: dict, doctor_id: Optional[int], patient_id: Optional
         ("order_status", ("order_status", "filled_status", "intent")),
         ("order_type", ("order_type", "category")),
         ("route", ("route",)),
-        ("frequency", ("frequencyText", "frequency_name_full", "sig")),
+        ("frequency", ("frequencyText", "frequency_name_full")),
         ("indication", ("indication", "reason", "reason_text", "reason_name_full", "reason_full_name", "reasonCode")),
-        ("number_refills", ("number_refills", "frequency", "refills", "numberOfRepeatsAllowed")),
+        ("number_refills", ("number_refills", "refills", "numberOfRepeatsAllowed")),
         ("dispense_quantity", ("dispense_quantity", "quantity")),
         ("notes", ("notes", "note")),
-        ("signature_note", ("signature_note", "signature_instructions", "sig_note")),
-        ("pharmacy_note", ("pharmacy_note", "dosageInstructionText", "pharmacy_instructions", "dispense_note", "additional_instructions", "additional_instruction", "additionalInstruction")),
+        ("signature_note", ("signature_note", "signature_instructions", "sig_note", "sig", "dosageInstructionText")),
+        ("pharmacy_note", ("pharmacy_note", "pharmacy_instructions", "dispense_note")),
     ):
-        value = _first_present(record, *keys)
-        if isinstance(value, list) and value and isinstance(value[0], dict):
-            value = value[0].get("text") or _codeable_text(value[0])
-        elif isinstance(value, dict):
-            value = value.get("text") or _codeable_text(value)
-        if value not in (None, "", [], {}):
-            payload[target] = str(value).strip()
+        text = _med_first_text(record, *keys)
+        if text:
+            payload[target] = text
 
     route = _first_present(dosage, "route")
     if route:
@@ -2401,7 +2415,12 @@ def _map_allergy(record: dict, doctor_id: Optional[int], patient_id: Optional[in
     }
 
     note_record = record
-    reaction = record.get("reaction") or record.get("reaction_manifestation")
+    reaction = (
+        record.get("reaction")
+        or record.get("reaction_manifestation")
+        or record.get("reaction_code")
+        or record.get("manifestation")
+    )
     if isinstance(reaction, list) and reaction:
         reaction_entry = reaction[0] or {}
         manifestation = reaction_entry.get("manifestation") if isinstance(reaction_entry, dict) else None
@@ -2557,7 +2576,6 @@ _NOT_PROVIDED = "Not Provided."
 # when the source is empty. ONLY string fields DrChrono accepts as free text — never
 # ids, enums, numbers, dates, booleans, or codes (those stay omitted, or DrChrono 400s).
 _TEXT_DEFAULT_FIELDS = {
-    "medication":        ("notes", "indication", "frequency", "route", "signature_note", "pharmacy_note"),
     "condition":         ("notes",),
     "allergy":           ("reaction", "notes"),
     "encounter":         ("reason", "notes"),
@@ -5113,15 +5131,6 @@ async def push_document_file(
         metatags=metatags,
         archived=archived,
     )
-
-
-
-
-
-
-
-
-
 
 
 
