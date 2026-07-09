@@ -3,12 +3,12 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from app.routes.push import _map_patient
+from app.routes.push import _map_record
 
 
 def test_patient_maps_raw_csv_column_names():
     """patient.csv uses address_street/address_city/race_display/etc. — these must map."""
-    payload = _map_patient(
+    payload = _map_record("patient", 
         {
             "first_name": "Samuel", "last_name": "Rossi", "name_suffix": "Jr",
             "date_of_birth": "15-01-1945", "gender_administrative": "Male",
@@ -36,7 +36,7 @@ def test_patient_maps_raw_csv_column_names():
 
 
 def test_patient_insurance_includes_subscriber_block_defaulting_to_patient():
-    payload = _map_patient(
+    payload = _map_record("patient", 
         {
             "first_name": "Ethan", "middle_name": "Michael", "last_name": "Harrison",
             "date_of_birth": "1945-01-15", "gender": "Male",
@@ -68,7 +68,7 @@ def test_patient_insurance_includes_subscriber_block_defaulting_to_patient():
 
 
 def test_patient_insurance_subscriber_from_coverage_when_not_patient():
-    payload = _map_patient(
+    payload = _map_record("patient", 
         {
             "first_name": "Ethan", "last_name": "Harrison", "gender": "Male",
             "coverages": [{
@@ -89,7 +89,7 @@ def test_patient_insurance_subscriber_from_coverage_when_not_patient():
 
 
 def test_patient_mapping_adds_optional_drchrono_fields_from_related_data():
-    payload = _map_patient(
+    payload = _map_record("patient", 
         {
             "name": [{"use": "official", "given": ["Jane", "A"], "family": "Doe", "suffix": ["PhD"]}],
             "birthDate": "1985-04-12",
@@ -199,7 +199,7 @@ def test_patient_mapping_adds_optional_drchrono_fields_from_related_data():
 
 
 def test_patient_mapping_minimum_record_still_succeeds():
-    payload = _map_patient(
+    payload = _map_record("patient", 
         {
             "first_name": "Min",
             "last_name": "Patient",
@@ -219,7 +219,7 @@ def test_patient_mapping_minimum_record_still_succeeds():
 
 
 def test_patient_mapping_omits_empty_nested_objects():
-    payload = _map_patient(
+    payload = _map_record("patient", 
         {
             "first_name": "Empty",
             "last_name": "Nested",

@@ -26,16 +26,17 @@ def _note23_report():
 def test_diagnostic_report_pdf_carries_professional_fields():
     captured = {}
 
-    def fake_post(url, headers=None, data=None, files=None, timeout=None):
-        captured["data"] = data
-        captured["pdf"] = files["document"][1]
+    def fake_configured_call(api_name, token, **kwargs):
+        assert api_name == "documents"
+        captured["data"] = kwargs["data"]
+        captured["pdf"] = kwargs["files"]["document"][1]
         resp = MagicMock()
         resp.status_code = 201
         resp.json.return_value = {"id": 999}
         resp.text = ""
         return resp
 
-    with patch.object(push.requests, "post", side_effect=fake_post):
+    with patch.object(push, "call_configured_api", side_effect=fake_configured_call):
         result = push._upload_diagnostic_report_as_document(
             _note23_report(), token="x", doctor_id=525460, patient_id=134558544
         )
@@ -67,12 +68,13 @@ def test_pdf_title_has_no_corrupted_dash():
 
     captured = {}
 
-    def fake_post(url, headers=None, data=None, files=None, timeout=None):
-        captured["pdf"] = files["document"][1]
+    def fake_configured_call(api_name, token, **kwargs):
+        assert api_name == "documents"
+        captured["pdf"] = kwargs["files"]["document"][1]
         resp = MagicMock(); resp.status_code = 201; resp.json.return_value = {"id": 1}; resp.text = ""
         return resp
 
-    with patch.object(push.requests, "post", side_effect=fake_post):
+    with patch.object(push, "call_configured_api", side_effect=fake_configured_call):
         push._upload_diagnostic_report_as_document(_note23_report(), token="x", doctor_id=1, patient_id=2)
 
     pdf = captured["pdf"]
@@ -100,8 +102,9 @@ def test_diagnostic_report_conclusion_code_labeled_by_vocab():
     """When a conclusion code is present it is labeled with its actual vocabulary."""
     captured = {}
 
-    def fake_post(url, headers=None, data=None, files=None, timeout=None):
-        captured["pdf"] = files["document"][1]
+    def fake_configured_call(api_name, token, **kwargs):
+        assert api_name == "documents"
+        captured["pdf"] = kwargs["files"]["document"][1]
         resp = MagicMock()
         resp.status_code = 201
         resp.json.return_value = {"id": 1}
@@ -110,7 +113,7 @@ def test_diagnostic_report_conclusion_code_labeled_by_vocab():
 
     rec = _note23_report()
     rec["conclusion_code"] = "R79.89"
-    with patch.object(push.requests, "post", side_effect=fake_post):
+    with patch.object(push, "call_configured_api", side_effect=fake_configured_call):
         push._upload_diagnostic_report_as_document(rec, token="x", doctor_id=1, patient_id=2)
 
     assert b"ICD-10-CM:" in captured["pdf"]

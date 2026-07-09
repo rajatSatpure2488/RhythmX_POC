@@ -4,7 +4,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from app.routes import push
-from app.routes.push import _map_condition
+from app.routes.push import _map_record
 
 
 def test_problem_tags_appointment_from_encounter_id_via_registry():
@@ -13,7 +13,7 @@ def test_problem_tags_appointment_from_encounter_id_via_registry():
     src = "5c857f24-1ceb-41f8-b46b-e713e8811703"
     push._APPT_ID_MAP[src] = "401429530"
     try:
-        payload = _map_condition(
+        payload = _map_record("condition", 
             {"encounter_id": src, "name_full": "Concentric LVH", "code": "I51.7",
              "code_vocab": "ICD-10-CM"},
             doctor_id=525460,
@@ -25,7 +25,7 @@ def test_problem_tags_appointment_from_encounter_id_via_registry():
 
 
 def test_problem_notes_fall_back_to_name_full():
-    payload = _map_condition(
+    payload = _map_record("condition", 
         {"name_full": "Concentric Left Ventricular Hypertrophy",
          "name_rx": "Left Ventricular Hypertrophy", "code": "I51.7", "code_vocab": "ICD-10-CM"},
         doctor_id=525460,
@@ -36,7 +36,7 @@ def test_problem_notes_fall_back_to_name_full():
 
 
 def test_problem_mapping_matches_drchrono_payload_shape():
-    payload = _map_condition(
+    payload = _map_record("condition", 
         {
             "appointment": 401127463,
             "name": "Diabetes Management Plan",
@@ -75,7 +75,7 @@ def test_problem_mapping_matches_drchrono_payload_shape():
 
 def test_problem_mapping_derives_icd_version_from_code_vocab():
     """conditions.csv carries code + code_vocab; the ICD version is inferred from the vocab."""
-    payload = _map_condition(
+    payload = _map_record("condition", 
         {
             "category": "problem-list-item",
             "code": "I51.7",
@@ -99,7 +99,7 @@ def test_problem_mapping_derives_icd_version_from_code_vocab():
 
 
 def test_problem_mapping_routes_snomed_code_by_vocab():
-    payload = _map_condition(
+    payload = _map_record("condition", 
         {"code": "698360008", "code_vocab": "SNOMED-CT", "name_full": "Diabetes"},
         doctor_id=525460,
         patient_id=134558544,

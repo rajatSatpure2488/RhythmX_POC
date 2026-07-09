@@ -3,11 +3,11 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from app.routes.push import _map_allergy
+from app.routes.push import _map_record
 
 
 def test_allergy_mapping_matches_drchrono_payload_shape():
-    payload = _map_allergy(
+    payload = _map_record("allergy", 
         {
             "status": "active",
             "type": "Allergy",
@@ -51,7 +51,7 @@ def test_allergy_mapping_matches_drchrono_payload_shape():
 
 
 def test_allergy_notes_synthesized_and_uncoded_fields_suppressed():
-    payload = _map_allergy(
+    payload = _map_record("allergy", 
         {
             "status": "Active",
             "type": "Allergy",
@@ -80,3 +80,27 @@ def test_allergy_notes_synthesized_and_uncoded_fields_suppressed():
     assert not any(l.startswith("Severity:") for l in lines)
     assert not any(l.startswith("Criticality:") for l in lines)
     assert not any(l.startswith("Code:") for l in lines)
+
+
+def test_allergy_push_mapping_uses_configured_ehr_column_names():
+    payload = _map_record(
+        "allergy",
+        {
+            "allergen_text": "Latex",
+            "reaction_text": "Hives",
+            "severity_text": "Moderate",
+            "allergen_code": "300916003",
+            "allergen_code_system": "SNOMED-CT",
+            "allergy_status": "active",
+        },
+        doctor_id=525460,
+        patient_id=134706970,
+    )
+
+    assert payload["patient"] == 134706970
+    assert payload["doctor"] == 525460
+    assert payload["description"] == "Latex"
+    assert payload["reaction"] == "Hives"
+    assert "Severity: Moderate" in payload["notes"]
+    assert "Code: 300916003" in payload["notes"]
+    assert "Code System: SNOMED CT" in payload["notes"]

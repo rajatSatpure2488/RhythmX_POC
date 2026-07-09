@@ -34,7 +34,9 @@ medisync/logs/
 
 # Backend (Python)
 __pycache__/
+**/__pycache__/
 *.py[cod]
+*.pyc
 *$py.class
 *.so
 .Python

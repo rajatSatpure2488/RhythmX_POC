@@ -3,11 +3,11 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from app.routes.push import _map_medication
+from app.routes.push import _map_record
 
 
 def test_medication_mapping_adds_optional_drchrono_fields_from_fhir():
-    payload = _map_medication(
+    payload = _map_record("medication", 
         {
             "medicationCodeableConcept": {
                 "coding": [
@@ -72,7 +72,7 @@ def test_medication_mapping_adds_optional_drchrono_fields_from_fhir():
 
 
 def test_medication_mapping_extracts_ndc_from_fhir_coding():
-    payload = _map_medication(
+    payload = _map_record("medication", 
         {
             "medicationCodeableConcept": {
                 "coding": [
@@ -98,7 +98,7 @@ def test_medication_mapping_extracts_ndc_from_fhir_coding():
 
 
 def test_medication_mapping_extracts_ndc_from_flat_field():
-    payload = _map_medication(
+    payload = _map_record("medication", 
         {"name": "Metformin", "ndc": "0002-8215-01"},
         doctor_id=1234,
         patient_id=5678,
@@ -108,7 +108,7 @@ def test_medication_mapping_extracts_ndc_from_flat_field():
 
 
 def test_medication_mapping_minimum_record_still_succeeds():
-    payload = _map_medication(
+    payload = _map_record("medication", 
         {"drug_name": "Metformin"},
         doctor_id=1234,
         patient_id=5678,
@@ -127,7 +127,7 @@ def test_medication_mapping_minimum_record_still_succeeds():
 
 
 def test_medication_mapping_omits_invalid_rxnorm_and_empty_fields():
-    payload = _map_medication(
+    payload = _map_record("medication", 
         {
             "name": "Medication without valid RxNorm",
             "rxnorm": "NDC-123",
@@ -146,7 +146,7 @@ def test_medication_mapping_omits_invalid_rxnorm_and_empty_fields():
 
 
 def test_medication_mapping_matches_reference_payload_shape():
-    payload = _map_medication(
+    payload = _map_record("medication", 
         {
             "appointment": 401127463,
             "start_dt": "1997-03-31",

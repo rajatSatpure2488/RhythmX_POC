@@ -3,11 +3,11 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from app.routes.push import _map_encounter
+from app.routes.push import _map_record
 
 
 def test_appointment_mapping_adds_optional_drchrono_enrichments():
-    payload = _map_encounter(
+    payload = _map_record("encounter", 
         {
             "scheduled_time": "2026-06-22T10:00:00",
             "duration_in_mins": "75min",
@@ -54,7 +54,7 @@ def test_appointment_mapping_adds_optional_drchrono_enrichments():
 def test_appointment_custom_fields_cover_new_field_ids_from_appointment_csv():
     """The DrChrono custom-field form was extended with Reason Short Name (11463),
     Reason Code (11488) and Reason Code Vocabulary (11489)."""
-    payload = _map_encounter(
+    payload = _map_record("encounter", 
         {
             "scheduled_time": "2009-02-16T10:00:00",
             "practitioner_name": "Dr. Michael Brown, MD",
@@ -83,7 +83,7 @@ def test_appointment_custom_fields_cover_new_field_ids_from_appointment_csv():
 
 
 def test_appointment_mapping_omits_empty_optional_enrichments():
-    payload = _map_encounter(
+    payload = _map_record("encounter", 
         {
             "date": "2026-06-22",
             "chief_complaint": "",
@@ -102,7 +102,7 @@ def test_appointment_mapping_omits_empty_optional_enrichments():
 
 
 def test_appointment_mapping_uses_related_condition_and_practitioner_data():
-    payload = _map_encounter(
+    payload = _map_record("encounter", 
         {
             "start": "2026-06-22T11:00:00",
             "type": [{"coding": [{"display": "Consultation"}]}],
@@ -141,7 +141,7 @@ def test_appointment_mapping_uses_related_condition_and_practitioner_data():
 
 
 def test_encounter_mapping_uses_same_enriched_appointment_fields_when_reason_missing():
-    payload = _map_encounter(
+    payload = _map_record("encounter", 
         {
             "source_encounter_id": "enc-1",
             "start_dt": "2026-06-22T10:00:00Z",

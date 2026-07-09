@@ -124,17 +124,27 @@ def test_push_clinical_note_patches_appointment_vitals_and_posts_field_values():
         "weight": 158,
     }
 
-    with patch("app.routes.push.requests.patch", return_value=patch_resp) as mock_patch, \
+    def fake_configured_call(api_name, token, **kwargs):
+        if api_name == "appointments_update":
+            return patch_resp
+        if api_name == "clinical_note_field_values":
+            return post_resp
+        raise AssertionError(f"unexpected configured API: {api_name}")
+
+    with patch("app.routes.push.call_configured_api", side_effect=fake_configured_call) as mock_call, \
          patch("app.routes.push.requests.put") as mock_put, \
-         patch("app.routes.push.requests.get", return_value=get_resp), \
-         patch("app.routes.push.requests.post", return_value=post_resp) as mock_post:
+         patch("app.routes.push.requests.get", return_value=get_resp):
         result = push._push_clinical_note_yellow_notepad(note, "token", doctor_id=525460, patient_id=134558544)
 
     assert result["success"] is True
     mock_put.assert_not_called()
-    assert mock_patch.call_args[0][0].endswith("appointments/400645894")
-    assert "clinical_note_field_values" in mock_post.call_args_list[0][0][0]
-    sent_payloads = [call.kwargs["json"] for call in mock_post.call_args_list]
+    assert mock_call.call_args_list[0].args[0] == "appointments_update"
+    assert mock_call.call_args_list[0].kwargs["path_params"] == {"appointment_id": 400645894}
+    sent_payloads = [
+        call.kwargs["payload"]
+        for call in mock_call.call_args_list
+        if call.args[0] == "clinical_note_field_values"
+    ]
     assert {p["clinical_note_field"] for p in sent_payloads} == {206682183, 206682191}
 
 

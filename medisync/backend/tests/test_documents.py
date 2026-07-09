@@ -85,10 +85,40 @@ def test_reference_endpoint_map_for_push_resources():
     assert push.ENDPOINT_MAP["procedures"] == "clinical_note_section_field_values"
 
 
+def test_live_push_record_uses_configured_api_client_for_json_push():
+    response = SimpleNamespace(
+        status_code=201,
+        text='{"id": 456}',
+        json=lambda: {"id": 456},
+    )
+
+    with (
+        patch.object(push, "find_existing_patient", return_value=None),
+        patch.object(push, "call_configured_api", return_value=response) as mock_call,
+    ):
+        result = push._live_push_record(
+            {
+                "first_name": "Ada",
+                "last_name": "Lovelace",
+                "date_of_birth": "1815-12-10",
+                "gender": "female",
+            },
+            "patient",
+            "token-123",
+            doctor_id=7,
+        )
+
+    assert result["success"] is True
+    assert result["drchrono_id"] == 456
+    mock_call.assert_called_once()
+    assert mock_call.call_args.args[:2] == ("patient", "token-123")
+    assert mock_call.call_args.kwargs["payload"]["first_name"] == "Ada"
+
+
 def test_reference_payload_mapping_for_common_resources():
     # 'office' is intentionally omitted (filled from a live /api/offices lookup, not the
     # doctor id), and the encounter_type populates appointment custom field 11474.
-    assert push._map_encounter(
+    assert push._map_record("encounter", 
         {"start_dt": "2026-05-20T10:00:00", "status": "finished", "encounter_type": "Follow-up"},
         doctor_id=7,
         patient_id=8,
@@ -104,7 +134,7 @@ def test_reference_payload_mapping_for_common_resources():
         "custom_fields": [{"field_type": 11474, "field_value": "Follow-up"}],
     }
 
-    assert push._map_coverage(
+    assert push._map_record("coverage", 
         {"payer_name": "Aetna", "plan_name": "PPO", "member_id": "M123", "group_id": "G1"},
         doctor_id=7,
         patient_id=8,

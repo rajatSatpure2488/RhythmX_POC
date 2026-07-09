@@ -1,0 +1,651 @@
+{
+  "emr": {
+    "name": "DrChrono"
+  },
+  "defaults": {
+    "base_url_config": "DRCHRONO_API_BASE",
+    "headers": {
+      "Authorization": "Bearer {token}",
+      "Content-Type": "application/json",
+      "X-DRC-API-Version": "{DRCHRONO_API_VERSION}"
+    },
+    "success_status_codes": [200, 201],
+    "timeout_seconds": 20,
+    "request_body": "json",
+    "payload": {
+      "source": "mapped_payload",
+      "allow_extra_fields": true,
+      "strip_empty": true,
+      "validate_required": true,
+      "required_fields": [],
+      "optional_fields": [],
+      "defaults": {},
+      "field_sources": {}
+    }
+  },
+  "lookups": {
+    "existing_patient": {
+      "api": "patients_search",
+      "params": {
+        "first_name": "payload.first_name",
+        "last_name": "payload.last_name",
+        "date_of_birth": "payload.date_of_birth"
+      },
+      "result_list_path": "results",
+      "result_id_path": "id"
+    },
+    "default_office": {
+      "api": "offices",
+      "cache_by": ["token_suffix", "context.doctor_id"],
+      "result_list_path": "results",
+      "match": {
+        "field": "doctor",
+        "context": "doctor_id"
+      },
+      "result_id_path": "id",
+      "result_secondary_path": "exam_rooms.0.index",
+      "secondary_default": 1
+    },
+    "appointment_by_patient_date": {
+      "api": "appointments_lookup",
+      "params": {
+        "patient": "context.patient_id",
+        "date": "context.date"
+      },
+      "result_list_path": "results",
+      "result_id_path": "id"
+    },
+    "appointment_detail": {
+      "api": "appointment_get",
+      "path_params": {
+        "appointment_id": "context.appointment_id"
+      }
+    }
+  },
+  "apis": {
+    "patients": {
+      "method": "POST",
+      "path": "patients",
+      "aliases": ["patient", "Patient"],
+      "payload": {
+        "required_fields": ["first_name", "last_name", "date_of_birth", "gender"],
+        "optional_fields": [
+          "doctor",
+          "email",
+          "home_phone",
+          "cell_phone",
+          "address",
+          "city",
+          "state",
+          "zip_code"
+        ],
+        "field_sources": {
+          "doctor": ["$context.doctor_id"],
+          "first_name": ["first_name", "given", "name.0.given.0"],
+          "middle_name": ["middle_name", "name.0.given.1"],
+          "last_name": ["last_name", "family", "name.0.family"],
+          "suffix": ["suffix", "name_suffix", "name.0.suffix.0"],
+          "date_of_birth": {"sources": ["date_of_birth", "birth_date", "birthDate", "dob"], "transform": "date"},
+          "gender": {"sources": ["gender", "sex", "gender_administrative", "administrative_gender"], "transform": "gender"},
+          "email": ["email"],
+          "home_phone": ["home_phone", "phone"],
+          "cell_phone": ["cell_phone", "mobile_phone"],
+          "address": ["address", "address_street", "street", "address.0.line.0"],
+          "city": ["city", "address_city", "address.0.city"],
+          "state": ["state", "address_state_code", "address_state", "address.0.state"],
+          "zip_code": ["zip_code", "zip", "address_postal_code", "address.0.postalCode"]
+        }
+      }
+    },
+    "patients_search": {
+      "method": "GET",
+      "path": "patients",
+      "request_body": "none",
+      "aliases": ["patient_search", "patients_lookup"],
+      "payload": {
+        "source": "query_params",
+        "validate_required": false,
+        "optional_fields": ["first_name", "last_name", "date_of_birth"],
+        "field_sources": {
+          "first_name": ["first_name"],
+          "last_name": ["last_name"],
+          "date_of_birth": ["date_of_birth"]
+        }
+      }
+    },
+    "appointments": {
+      "method": "POST",
+      "path": "appointments",
+      "aliases": ["appointment", "appointments", "encounter", "encounters", "Appointment", "Encounter"],
+      "payload": {
+        "required_fields": ["doctor", "office", "patient", "scheduled_time", "duration", "exam_room"],
+        "optional_fields": [
+          "status",
+          "reason",
+          "notes",
+          "allow_overlapping",
+          "custom_fields"
+        ],
+        "defaults": {
+          "duration": 30,
+          "exam_room": 1,
+          "allow_overlapping": true,
+          "status": "Confirmed"
+        },
+        "field_sources": {
+          "patient": ["$context.patient_id"],
+          "doctor": ["$context.doctor_id"],
+          "office": {"sources": ["office", "office_id", "location_id"], "transform": "int"},
+          "exam_room": {"sources": ["exam_room", "room"], "transform": "int", "default": 1},
+          "scheduled_time": {"sources": ["scheduled_time", "start_dt", "start", "date", "appointment_date", "encounter_date", "visit_date"], "transform": "datetime"},
+          "duration": {"sources": ["duration_in_mins", "duration", "duration_minutes", "minutesDuration", "length_minutes"], "transform": "duration_minutes", "default": 30},
+          "status": {"sources": ["status"], "transform": "appointment_status", "default": "Confirmed"},
+          "reason": ["reason_name_full", "reason_full_name", "reason", "chief_complaint", "service_type", "appointment_type", "encounter_type", "class_display", "description"],
+          "notes": ["notes", "appointment_notes", "clinical_notes", "comment"],
+          "payment_profile": ["payment_profile"],
+          "icd10_codes": ["icd10_codes", "primary_diagnosis_code"],
+          "custom_fields": {
+            "transform": "custom_fields",
+            "mappings": [
+              {"field_type": 11463, "sources": ["reason_name_short"]},
+              {"field_type": 11465, "sources": ["description", "chief_complaint"]},
+              {"field_type": 11466, "sources": ["comment", "clinical_notes", "clinical_note", "appointment_notes", "notes"]},
+              {"field_type": 11472, "sources": ["service_type", "appointment_type", "encounter_type", "type", "type.0.coding.0.display"]},
+              {"field_type": 11473, "sources": ["specialty", "practitioner.specialty", "provider.specialty"]},
+              {"field_type": 11474, "sources": ["appointment_type", "encounter_type", "care_setting", "setting", "class_display", "class.text", "class"]},
+              {"field_type": 11475, "sources": ["provider_name", "practitioner_name", "doctor_name", "practitioner.name.0"]},
+              {"field_type": 11488, "sources": ["reason_code"]},
+              {"field_type": 11489, "sources": ["reason_code_vocab"]}
+            ]
+          }
+        }
+      }
+    },
+    "appointments_lookup": {
+      "method": "GET",
+      "path": "appointments",
+      "request_body": "none",
+      "aliases": ["appointment_lookup", "appointments_search"],
+      "payload": {
+        "source": "query_params",
+        "validate_required": false,
+        "optional_fields": ["patient", "date", "doctor"],
+        "field_sources": {
+          "patient": ["patient"],
+          "date": ["date"],
+          "doctor": ["doctor"]
+        }
+      }
+    },
+    "appointment_get": {
+      "method": "GET",
+      "path": "appointments/{appointment_id}",
+      "request_body": "none",
+      "aliases": ["appointment_detail"],
+      "payload": {
+        "source": "none",
+        "validate_required": false
+      }
+    },
+    "appointments_update": {
+      "method": "PATCH",
+      "path": "appointments/{appointment_id}",
+      "aliases": ["appointment_update", "appointment_vitals_update"],
+      "payload": {
+        "required_fields": [],
+        "optional_fields": ["status", "vitals", "exam_room", "scheduled_time", "patient", "office", "doctor"],
+        "field_sources": {}
+      }
+    },
+    "problems": {
+      "method": "POST",
+      "path": "problems",
+      "aliases": ["condition", "conditions", "problem", "problems", "problem_list", "Condition"],
+      "payload": {
+        "required_fields": ["patient", "doctor", "description"],
+        "optional_fields": ["status", "icd_code", "date_onset", "notes", "appointment"],
+        "text_defaults": {
+          "notes": "Not Provided."
+        },
+        "field_sources": {
+          "patient": ["$context.patient_id"],
+          "doctor": ["$context.doctor_id"],
+          "description": ["description", "name_rx", "name_short", "name", "name_full", "condition_name", "code.text"],
+          "name": ["name", "name_full", "code.text"],
+          "status": {"sources": ["status", "clinicalStatus.text"], "transform": "active_status"},
+          "icd_code": ["icd_code", "code_value", "icd10_code", "icd", "code"],
+          "date_onset": {"sources": ["date_onset", "onsetDateTime", "start_dt", "onset_date"], "transform": "date"},
+          "date_diagnosis": {"sources": ["date_diagnosis", "diagnosis_date", "recorded_dt", "recordedDate"], "transform": "date"},
+          "notes": ["notes", "note", "clinical_note", "plan", "instructions", "name_full"]
+        }
+      }
+    },
+    "medications": {
+      "method": "POST",
+      "path": "medications",
+      "aliases": ["medication", "medications", "MedicationRequest"],
+      "payload": {
+        "required_fields": ["patient", "doctor", "name"],
+        "optional_fields": [
+          "appointment",
+          "date_prescribed",
+          "status",
+          "order_status",
+          "rxnorm",
+          "dosage_quantity",
+          "dosage_unit",
+          "route",
+          "frequency",
+          "indication",
+          "number_refills",
+          "start_date",
+          "notes"
+        ],
+        "defaults": {
+          "order_status": "Ordered",
+          "order_type": "Prescription",
+          "prn": false,
+          "daw": false
+        },
+        "text_defaults": {
+          "notes": "Not Provided.",
+          "indication": "Not Provided.",
+          "frequency": "Not Provided.",
+          "route": "Not Provided.",
+          "signature_note": "Not Provided.",
+          "pharmacy_note": "Not Provided."
+        },
+        "field_sources": {
+          "patient": ["$context.patient_id"],
+          "doctor": ["$context.doctor_id"],
+          "name": ["name", "name_full", "display", "medication_name", "drug_name", "description", "medicationCodeableConcept.text"],
+          "appointment": ["appointment", "appointment_id", "drchrono_appointment_id"],
+          "status": {"sources": ["status"], "transform": "active_status", "default": "active"},
+          "rxnorm": ["rxnorm", "rxnorm_code"],
+          "ndc": ["ndc", "ndc_code", "national_drug_code"],
+          "date_prescribed": {"sources": ["date_prescribed", "start_dt", "authoredOn", "authored_on", "ordered_at", "date"], "transform": "date"},
+          "date_started_taking": {"sources": ["date_started_taking", "start_date", "effectiveDateTime", "effectivePeriod.start"], "transform": "date"},
+          "dosage_quantity": ["dosage_quantity", "dose_quantity"],
+          "dosage_units": ["dosage_units", "dosage_unit", "dose_unit", "unit"],
+          "route": ["route"],
+          "frequency": ["frequencyText", "frequency_name_full", "frequency", "sig"],
+          "indication": ["indication", "reason", "reason_text", "reason_name_full", "reason_full_name"],
+          "number_refills": {"sources": ["number_refills", "refills", "numberOfRepeatsAllowed", "frequency"], "transform": "int"},
+          "dispense_quantity": {"sources": ["dispense_quantity", "dispenseRequest.quantity.value"], "transform": "int"},
+          "prn": {"sources": ["prn", "dosageInstruction.0.asNeededBoolean"], "transform": "bool", "default": false},
+          "daw": {"sources": ["daw", "substitution.allowedBoolean"], "transform": "bool", "default": false},
+          "signature_note": ["signature_note"],
+          "pharmacy_note": ["pharmacy_note", "dosagePatientInstruction", "dosageInstructionText"],
+          "notes": ["notes", "note", "dosagePatientInstruction", "dosageInstructionText"]
+        }
+      }
+    },
+    "allergies": {
+      "method": "POST",
+      "path": "allergies",
+      "aliases": ["allergy", "allergies", "AllergyIntolerance"],
+      "payload": {
+        "required_fields": ["patient", "doctor", "description"],
+        "optional_fields": ["status", "reaction", "severity", "category", "notes"],
+        "text_defaults": {
+          "reaction": "Not Provided."
+        },
+        "field_sources": {
+          "patient": ["$context.patient_id"],
+          "doctor": ["$context.doctor_id"],
+          "description": ["description", "name", "name_full", "name_short", "substance", "allergen", "allergen_text", "allergy_name", "code.text"],
+          "status": {"sources": ["clinicalStatus", "status", "allergy_status"], "transform": "active_status", "default": "active"},
+          "reaction": ["reaction", "reaction_manifestation", "reaction_text", "manifestation"],
+          "reaction_severity": ["reaction_severity", "severity", "severity_text"],
+          "allergy_criticality": ["allergy_criticality", "criticality"],
+          "category": ["category", "allergy_category"],
+          "type": ["type", "allergy_type"],
+          "rxnorm": ["rxnorm", "rxnorm_code"],
+          "snomed_code": ["snomed_code"],
+          "snomed_reaction": ["snomed_reaction"],
+          "code": ["code", "allergen_code"],
+          "code_vocab": ["code_vocab", "code_system", "allergen_code_system"],
+          "notes": {"transform": "allergy_notes"}
+        }
+      }
+    },
+    "vaccines": {
+      "method": "POST",
+      "path": "vaccines",
+      "aliases": ["immunization", "immunizations"],
+      "payload": {
+        "required_fields": ["patient", "doctor", "name"],
+        "optional_fields": ["administered_at", "lot_number", "manufacturer", "site", "route", "notes"],
+        "field_sources": {
+          "patient": ["$context.patient_id"],
+          "doctor": ["$context.doctor_id"],
+          "name": ["name", "name_full", "vaccine_name", "vaccineCode.text"],
+          "administered_at": {"sources": ["administered_at", "occurrenceDateTime", "occurrence_dt", "date"], "transform": "date"},
+          "lot_number": ["lot_number", "lotNumber"],
+          "manufacturer": ["manufacturer"],
+          "site": ["site"],
+          "route": ["route"],
+          "notes": ["notes", "note"]
+        }
+      }
+    },
+    "patient_vaccine_records": {
+      "method": "POST",
+      "path": "patient_vaccine_records",
+      "aliases": ["Immunization"],
+      "payload": {
+        "required_fields": ["patient", "doctor"],
+        "optional_fields": [
+          "vaccine_inventory",
+          "vaccine_name",
+          "administered_at",
+          "administered_by",
+          "lot_number",
+          "site",
+          "route",
+          "notes"
+        ],
+        "field_sources": {
+          "patient": ["$context.patient_id"],
+          "doctor": ["$context.doctor_id"],
+          "vaccine_inventory": ["vaccine_inventory", "vaccine_inventory_id"],
+          "vaccine_name": ["vaccine_name", "name", "name_full", "vaccineCode.text"],
+          "administered_at": {"sources": ["administered_at", "occurrenceDateTime", "occurrence_dt", "date"], "transform": "date"},
+          "administered_by": ["administered_by", "performer_id"],
+          "lot_number": ["lot_number", "lotNumber"],
+          "site": ["site"],
+          "route": ["route"],
+          "notes": ["notes", "note"]
+        }
+      }
+    },
+    "patient_lab_results": {
+      "method": "POST",
+      "path": "patient_lab_results",
+      "aliases": ["observation", "observations", "observation_note", "observation_notes"],
+      "payload": {
+        "required_fields": ["patient", "title"],
+        "optional_fields": [
+          "ordering_doctor",
+          "appointment",
+          "document_date",
+          "notes",
+          "documents",
+          "status",
+          "value",
+          "unit",
+          "loinc_code"
+        ],
+        "field_sources": {
+          "patient": ["$context.patient_id"],
+          "doctor": ["$context.doctor_id"],
+          "title": ["title", "name_full", "name_short", "test_name", "code"],
+          "appointment": ["appointment", "appointment_id"],
+          "document_date": {"sources": ["document_date", "effective_dt", "effectiveDateTime", "date", "date_collected"], "transform": "date"},
+          "notes": ["notes", "note_text", "note", "conclusion"],
+          "status": ["status", "order_status"],
+          "value": ["value", "result", "value_string"],
+          "unit": ["value_unit", "unit", "units"],
+          "loinc_code": ["loinc_code", "code"]
+        }
+      }
+    },
+    "patient_physical_exams": {
+      "method": "POST",
+      "path": "patient_physical_exams",
+      "aliases": ["Observation"],
+      "payload": {
+        "required_fields": ["patient", "appointment"],
+        "optional_fields": ["vital_field", "value", "unit", "notes"],
+        "field_sources": {
+          "patient": ["$context.patient_id"],
+          "appointment": ["appointment", "appointment_id"],
+          "vital_field": ["vital_field", "clinical_note_field", "observation_type", "field_type", "code"],
+          "value": ["value", "result", "valueQuantity.value"],
+          "unit": ["value_unit", "unit", "units", "valueQuantity.unit"],
+          "notes": ["notes", "note"]
+        }
+      }
+    },
+    "clinical_note_field_values": {
+      "method": "POST",
+      "path": "clinical_note_field_values",
+      "aliases": ["clinical_note", "clinical_notes", "ClinicalNote", "ObservationNote"],
+      "payload": {
+        "required_fields": ["clinical_note_field", "value"],
+        "optional_fields": ["appointment", "field_type", "doctor", "patient"],
+        "field_sources": {
+          "patient": ["$context.patient_id"],
+          "doctor": ["$context.doctor_id"],
+          "clinical_note_field": ["clinical_note_field", "field_type"],
+          "field_type": ["field_type", "clinical_note_field"],
+          "value": ["value", "note_text", "notes", "text", "content", "summary_text"],
+          "appointment": ["appointment", "appointment_id"]
+        }
+      }
+    },
+    "clinical_note_section_field_values": {
+      "method": "POST",
+      "path": "clinical_note_section_field_values",
+      "aliases": ["procedure", "procedures"],
+      "payload": {
+        "required_fields": ["patient", "appointment", "name"],
+        "optional_fields": ["description", "date", "doctor", "code", "status"],
+        "field_sources": {
+          "patient": ["$context.patient_id"],
+          "doctor": ["$context.doctor_id"],
+          "appointment": ["appointment", "appointment_id"],
+          "name": ["name", "procedure_name", "name_full", "code.text"],
+          "description": ["description", "procedure_name", "name_full", "code.text"],
+          "date": {"sources": ["procedure_date", "performed_dt", "performedDateTime", "date"], "transform": "date"},
+          "code": ["code", "procedure_code", "cpt_code"],
+          "status": ["status"]
+        }
+      }
+    },
+    "procedures": {
+      "method": "POST",
+      "path": "procedures",
+      "aliases": ["Procedure"],
+      "payload": {
+        "required_fields": ["patient", "name"],
+        "optional_fields": ["appointment", "doctor", "description", "date", "code", "status"],
+        "field_sources": {
+          "patient": ["$context.patient_id"],
+          "doctor": ["$context.doctor_id"],
+          "appointment": ["appointment", "appointment_id"],
+          "name": ["name", "procedure_name", "name_full", "code.text"],
+          "description": ["description", "procedure_name", "name_full", "code.text"],
+          "date": {"sources": ["procedure_date", "performed_dt", "performedDateTime", "date"], "transform": "date"},
+          "code": ["code", "procedure_code", "cpt_code"],
+          "status": ["status"]
+        }
+      }
+    },
+    "documents": {
+      "method": "POST",
+      "path": "documents",
+      "request_body": "multipart",
+      "headers": {
+        "Authorization": "Bearer {token}",
+        "X-DRC-API-Version": "{DRCHRONO_API_VERSION}"
+      },
+      "timeout_seconds": 60,
+      "aliases": [
+        "document",
+        "documents",
+        "document_reference",
+        "document_references",
+        "diagnostic_report",
+        "diagnostic_reports",
+        "report",
+        "reports",
+        "DocumentReference"
+      ],
+      "payload": {
+        "source": "multipart_form",
+        "required_fields": ["patient", "description", "date"],
+        "optional_fields": ["doctor", "metatags", "archived"],
+        "field_sources": {
+          "patient": ["$context.patient_id"],
+          "doctor": ["$context.doctor_id"],
+          "description": ["description", "name", "name_full", "document_type"],
+          "date": {"sources": ["document_date", "date", "created_dt", "effective_dt", "report_date"], "transform": "date"},
+          "metatags": ["metatags", "tags", "document_type"],
+          "archived": ["archived"]
+        }
+      }
+    },
+    "lab_orders": {
+      "method": "POST",
+      "path": "lab_orders",
+      "aliases": ["service_request", "service_requests", "DiagnosticReport"],
+      "payload": {
+        "required_fields": ["patient", "doctor"],
+        "optional_fields": ["sublab", "clinical_info", "notes", "status", "order_type", "codes"],
+        "field_sources": {
+          "patient": ["$context.patient_id"],
+          "doctor": ["$context.doctor_id"],
+          "description": ["description", "service_name", "name_full", "name_short", "code.text"],
+          "status": ["status"],
+          "order_date": {"sources": ["order_date", "order_dt", "occurrence_dt", "occurrenceDateTime", "authored_dt", "authoredOn", "recorded_dt"], "transform": "date"},
+          "priority": ["priority"],
+          "notes": ["notes", "note", "comment"]
+        }
+      }
+    },
+    "tasks": {
+      "method": "POST",
+      "path": "tasks",
+      "aliases": ["ServiceRequest"],
+      "payload": {
+        "required_fields": ["category", "patient"],
+        "optional_fields": ["assignee_user", "title", "notes", "due_date", "status"],
+        "field_sources": {
+          "patient": ["$context.patient_id"],
+          "category": ["category", "task_category_id"],
+          "assignee_user": ["assignee_user", "assignee_user_id"],
+          "title": ["title", "description", "service_name", "name_full", "name_short"],
+          "notes": ["notes", "note", "comment"],
+          "due_date": {"sources": ["due_date", "occurrenceDateTime", "occurrence_dt"], "transform": "date"},
+          "status": ["status"]
+        }
+      }
+    },
+    "insurances": {
+      "method": "POST",
+      "path": "insurances",
+      "aliases": ["coverage", "coverages"],
+      "payload": {
+        "required_fields": ["patient", "insurance_company"],
+        "optional_fields": [
+          "insurance_plan_name",
+          "insurance_id_number",
+          "insurance_group_number",
+          "insurance_payer_id"
+        ],
+        "field_sources": {
+          "patient": ["$context.patient_id"],
+          "insurance_company": ["insurance_company", "payer_name", "payor_name"],
+          "insurance_plan_name": ["insurance_plan_name", "plan_name", "plan_short_name"],
+          "insurance_id_number": ["insurance_id_number", "member_id", "subscriber_id"],
+          "insurance_group_number": ["insurance_group_number", "group_id", "group_number", "plan_id"],
+          "insurance_payer_id": ["insurance_payer_id", "payer_id", "payor_id"]
+        }
+      }
+    },
+    "eligibility_checks": {
+      "method": "POST",
+      "path": "eligibility_checks",
+      "aliases": ["Coverage"],
+      "payload": {
+        "required_fields": ["patient", "appointment"],
+        "optional_fields": ["insurance_plan", "subscriber_id", "date_service", "doctor"],
+        "field_sources": {
+          "patient": ["$context.patient_id"],
+          "doctor": ["$context.doctor_id"],
+          "appointment": ["appointment", "appointment_id"],
+          "insurance_plan": ["insurance_plan", "insurance_plan_name", "plan_name"],
+          "subscriber_id": ["subscriber_id", "member_id", "insurance_id_number"],
+          "date_service": {"sources": ["date_service", "date", "effective_dt"], "transform": "date"}
+        }
+      }
+    },
+    "care_plans": {
+      "method": "POST",
+      "path": "care_plans",
+      "aliases": ["care_plan", "care_plans", "CarePlan"],
+      "payload": {
+        "required_fields": ["patient", "doctor", "name"],
+        "optional_fields": ["start_date", "end_date", "status", "notes"],
+        "field_sources": {
+          "patient": ["$context.patient_id"],
+          "doctor": ["$context.doctor_id"],
+          "name": ["name", "title"],
+          "start_date": {"sources": ["start_date", "period.start"], "transform": "date"},
+          "end_date": {"sources": ["end_date", "period.end"], "transform": "date"},
+          "status": ["status"],
+          "notes": ["notes", "description"]
+        }
+      }
+    },
+    "patient_communications": {
+      "method": "POST",
+      "path": "patient_communications",
+      "aliases": ["care_team", "care_teams", "CareTeam"],
+      "payload": {
+        "required_fields": ["patient", "doctor", "message"],
+        "optional_fields": ["date", "subject", "notes"],
+        "field_sources": {
+          "patient": ["$context.patient_id"],
+          "doctor": ["$context.doctor_id"],
+          "message": ["message", "notes", "name", "participant_summary"],
+          "date": {"sources": ["date", "period.start"], "transform": "date"},
+          "subject": ["subject", "name"],
+          "notes": ["notes"]
+        }
+      }
+    },
+    "doctors": {
+      "method": "GET",
+      "path": "doctors",
+      "request_body": "none",
+      "aliases": ["practitioner", "practitioners", "Practitioner"],
+      "payload": {
+        "source": "query_params",
+        "validate_required": false,
+        "optional_fields": ["user", "npi", "specialty", "search"],
+        "field_sources": {
+          "user": ["user", "user_id"],
+          "npi": ["npi", "identifier.0.value"],
+          "specialty": ["specialty"],
+          "search": ["search", "name"]
+        }
+      }
+    },
+    "users_current": {
+      "method": "GET",
+      "path": "users/current",
+      "request_body": "none",
+      "aliases": ["current_user", "users/current"],
+      "payload": {
+        "source": "none",
+        "validate_required": false
+      }
+    },
+    "offices": {
+      "method": "GET",
+      "path": "offices",
+      "request_body": "none",
+      "aliases": ["office", "office_lookup"],
+      "payload": {
+        "source": "query_params",
+        "validate_required": false,
+        "optional_fields": ["doctor"],
+        "field_sources": {
+          "doctor": ["$context.doctor_id", "doctor", "doctor_id"]
+        }
+      }
+    }
+  }
+}

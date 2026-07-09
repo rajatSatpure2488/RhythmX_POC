@@ -1,14 +1,15 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
-// Backend target — defaults to localhost for host-based dev,
+// Backend target — defaults to IPv4 localhost for host-based dev,
 // overridden to http://backend:8000 in docker-compose so the
 // frontend container reaches the backend service on the docker network.
-const BACKEND = process.env.BACKEND_URL || 'http://localhost:8000'
+const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000'
 
 export default defineConfig({
   plugins: [react()],
   server: {
+    host: '127.0.0.1',
     port: 8501,
     strictPort: true,          // Error if 8501 is taken — don't silently increment
     proxy: {
