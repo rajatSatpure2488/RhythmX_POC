@@ -16,37 +16,6 @@ from app.routes import upload
 from      app.push_data.emr_auth_client import emr_auth_client
 from      app.routes import ai_explain_router, auth_router, dryrun_router, execute_mapping_router, logs_router, push_data_router
 
-# # ── FHIR Pipeline (independent module — delete this block to remove) ──
-# try:
-#     from app.fhir_pipeline.router import router as pipeline_router
-#     _PIPELINE_AVAILABLE = True
-# except ImportError:
-#     pipeline_router = None
-#     _PIPELINE_AVAILABLE = False
-
-# # ── FHIR R5 Integration (independent module — delete this block to remove) ──
-# try:
-#     from app.fhir_r5.router import router as fhir_r5_router
-#     _FHIR_R5_AVAILABLE = True
-# except ImportError:
-#     fhir_r5_router = None
-#     _FHIR_R5_AVAILABLE = False
-
-# ── Rule-Based Mapper (FHIR R5 → DrChrono — delete this block to remove) ──
-# try:
-#     from app.mappers.router import router as mapper_router
-#     _MAPPER_AVAILABLE = True
-# except ImportError:
-#     mapper_router = None
-#     _MAPPER_AVAILABLE = False
-
-# try:
-#     from app.routes.fhir_proxy import router as fhir_proxy_router
-#     _FHIR_PROXY_AVAILABLE = True
-# except ImportError:
-#     fhir_proxy_router = None
-#     _FHIR_PROXY_AVAILABLE = False
-
 app = FastAPI(
     title="MediSync API",
     description="Clinical Notes Integration Platform",
@@ -80,23 +49,8 @@ app.include_router(execute_mapping_router.router, prefix="/mapping", tags=["Mapp
 app.include_router(dryrun_router.router,  prefix="/dryrun",  tags=["DryRun"])
 app.include_router(push_data_router.router,       prefix="/push",    tags=["Push"])
 app.include_router(ai_explain_router.router, prefix="/ai",      tags=["AI Assistant"])
-# app.include_router(drchrono.router,   prefix="/drchrono", tags=["DrChrono Resources"])
 app.include_router(logs_router.router,       prefix="/logs",     tags=["Logs"])
 
-# if _FHIR_PROXY_AVAILABLE and fhir_proxy_router is not None:
-#     app.include_router(fhir_proxy_router, prefix="/fhir-proxy", tags=["FHIR Proxy"])
-
-# # ── FHIR Pipeline (independent — remove this line to disconnect) ──
-# if _PIPELINE_AVAILABLE and pipeline_router is not None:
-#     app.include_router(pipeline_router, prefix="/pipeline", tags=["FHIR Pipeline"])
-
-# # ── FHIR R5 (independent — remove this line to disconnect) ──
-# if _FHIR_R5_AVAILABLE and fhir_r5_router is not None:
-#     app.include_router(fhir_r5_router, prefix="/fhir-r5", tags=["FHIR R5"])
-
-# ── Rule-Based Mapper (independent — remove this line to disconnect) ──
-# if _MAPPER_AVAILABLE and mapper_router is not None:
-#     app.include_router(mapper_router, prefix="/mapper", tags=["Mapper"])
 
 @app.on_event("startup")
 async def startup_event():
