@@ -20,7 +20,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from      app.push_data import MAPPER_REGISTRY, get_mapper, list_supported
+from app.push_data import MAPPER_REGISTRY, get_mapper, list_supported
 
 router = APIRouter()
 

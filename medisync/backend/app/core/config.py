@@ -1,107 +1,334 @@
 """
 MediSync — config.py
-Loads environment variables at module-import time.
-Includes detailed trace logging so we can confirm exactly which .env is loaded
-and which values are present at runtime.
+
+Class-based, maintainable application configuration.
+
+Features:
+- Loads backend/.env safely
+- Loads EMR dynamic config from app/emr_config/api_requests.json
+- Supports dynamic env names from api_requests.json
+- Adds sanitized startup logs
+- Keeps backward-compatible module-level constants
 """
 
-import os
-import logging
-import json
-from pathlib import Path
-from dotenv import load_dotenv
+from __future__ import annotations
 
-# ── Setup basic logging early (before our logger module) ──
+import json
+import logging
+import os
+from pathlib import Path
+from typing import Any, ClassVar
+
+from dotenv import load_dotenv
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Logging setup
+# ═══════════════════════════════════════════════════════════════════
+
 logging.basicConfig(
     level=logging.DEBUG,
     format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
-_log = logging.getLogger("  config")
 
-# ── Resolve .env path ──────────────────────────────────────
+logger = logging.getLogger("  config")
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Path resolution
+# ═══════════════════════════════════════════════════════════════════
+
+THIS_FILE = Path(__file__).resolve()
+
 # config.py lives at: backend/app/core/config.py
-# parents[2] = backend  (host) / /app (container, since Dockerfile WORKDIR=/app
-# and `COPY . .` copies backend/ contents — including .env — into /app)
-_THIS_FILE = Path(__file__).resolve()
-_ROOT      = _THIS_FILE.parents[2]
-_ENV_PATH  = _ROOT / ".env"
+# parents[2] = backend
+ROOT_DIR = THIS_FILE.parents[2]
 
-_log.debug(f"[config] __file__     = {_THIS_FILE}")
-_log.debug(f"[config] project root = {_ROOT}")
-_log.debug(f"[config] .env path    = {_ENV_PATH}")
-_log.debug(f"[config] .env exists  = {_ENV_PATH.exists()}")
+ENV_PATH = ROOT_DIR / ".env"
+EMR_CONFIG_PATH = ROOT_DIR / "app" / "emr_config" / "api_requests.json"
 
-# ── Load .env ──────────────────────────────────────────────
-_loaded = load_dotenv(dotenv_path=_ENV_PATH, override=True)
-_log.debug(f"[config] load_dotenv() returned: {_loaded}")
-
-def _load_emr_config() -> dict:
-    try:
-        with (_ROOT / "app" / "emr_config" / "api_requests.json").open("r", encoding="utf-8") as f:
-            return json.load(f).get("emr", {})
-    except Exception:
-        return {}
-
-EMR_CONFIG_PATH = _ROOT / "app" / "emr_config" / "api_requests.json"
-_EMR_CFG = _load_emr_config()
-_AUTH_CFG = _EMR_CFG.get("auth", {})
+load_dotenv(dotenv_path=ENV_PATH, override=True)
 
 
-def _configured_env(key: str, fallback_env: str, default: str = "") -> str:
-    env_name = str(_AUTH_CFG.get(f"{key}_env") or fallback_env)
-    configured_default = str(_AUTH_CFG.get(f"{key}_default") or default)
-    return os.getenv(env_name, configured_default)
+# ═══════════════════════════════════════════════════════════════════
+# Settings
+# ═══════════════════════════════════════════════════════════════════
+
+class AppSettings(BaseSettings):
+    """
+    Application settings loaded from:
+    1. .env
+    2. app/emr_config/api_requests.json
+    3. default values
+
+    EMR auth fields support dynamic env names configured in api_requests.json.
+
+    Example api_requests.json auth config:
+
+    {
+      "emr": {
+        "name": "DrChrono",
+        "auth": {
+          "client_id_env": "EMR_CLIENT_ID",
+          "client_secret_env": "EMR_CLIENT_SECRET",
+          "redirect_uri_env": "EMR_REDIRECT_URI",
+          "api_version_env": "EMR_API_VERSION",
+          "authorize_url": "...",
+          "token_url": "...",
+          "api_base_url": "..."
+        }
+      }
+    }
+    """
+
+    model_config = SettingsConfigDict(
+        env_file=str(ENV_PATH),
+        env_file_encoding="utf-8",
+        extra="ignore",
+        case_sensitive=True,
+    )
+
+    # ── Class-level paths ────────────────────────────────────────
+    THIS_FILE: ClassVar[Path] = THIS_FILE
+    ROOT_DIR: ClassVar[Path] = ROOT_DIR
+    ENV_PATH: ClassVar[Path] = ENV_PATH
+    EMR_CONFIG_PATH: ClassVar[Path] = EMR_CONFIG_PATH
+
+    # ── Backend/frontend config ──────────────────────────────────
+    FRONTEND_URL: str = "http://localhost:8501"
+    BACKEND_HOST: str = "0.0.0.0"
+    BACKEND_PORT: int = 8000
+
+    # ── EMR limits ───────────────────────────────────────────────
+    EMR_DAILY_LIMIT: int = 500
+    EMR_MINUTE_LIMIT: int = 29
+
+    # ── EMR config values populated from api_requests.json + env ─
+    EMR_NAME: str = "EMR"
+    EMR_CLIENT_ID: str = ""
+    EMR_CLIENT_SECRET: str = ""
+    EMR_REDIRECT_URI: str = "http://localhost:8501"
+    EMR_API_VERSION: str = "v4"
+
+    EMR_AUTH_URL: str = ""
+    EMR_TOKEN_URL: str = ""
+    EMR_API_BASE: str = ""
+
+    def __init__(self, **values: Any):
+        super().__init__(**values)
+
+        emr_config = self._load_emr_config()
+        auth_config = emr_config.get("auth", {}) if isinstance(emr_config, dict) else {}
+
+        self.EMR_NAME = str(emr_config.get("name") or "EMR")
+
+        self.EMR_CLIENT_ID = self._configured_env(
+            auth_config=auth_config,
+            key="client_id",
+            fallback_env="EMR_CLIENT_ID",
+            default=self.EMR_CLIENT_ID,
+        )
+
+        self.EMR_CLIENT_SECRET = self._configured_env(
+            auth_config=auth_config,
+            key="client_secret",
+            fallback_env="EMR_CLIENT_SECRET",
+            default=self.EMR_CLIENT_SECRET,
+        )
+
+        self.EMR_REDIRECT_URI = self._configured_env(
+            auth_config=auth_config,
+            key="redirect_uri",
+            fallback_env="EMR_REDIRECT_URI",
+            default=self.EMR_REDIRECT_URI,
+        )
+
+        self.EMR_API_VERSION = self._configured_env(
+            auth_config=auth_config,
+            key="api_version",
+            fallback_env="EMR_API_VERSION",
+            default=self.EMR_API_VERSION,
+        )
+
+        self.EMR_AUTH_URL = self._configured_value(
+            auth_config=auth_config,
+            key="authorize_url",
+            default=self.EMR_AUTH_URL,
+        )
+
+        self.EMR_TOKEN_URL = self._configured_value(
+            auth_config=auth_config,
+            key="token_url",
+            default=self.EMR_TOKEN_URL,
+        )
+
+        self.EMR_API_BASE = self._configured_value(
+            auth_config=auth_config,
+            key="api_base_url",
+            default=self.EMR_API_BASE,
+        )
+
+        self.log_startup_config()
+
+    # ═══════════════════════════════════════════════════════════════
+    # Internal helpers
+    # ═══════════════════════════════════════════════════════════════
+
+    @classmethod
+    def _load_emr_config(cls) -> dict[str, Any]:
+        """Load EMR config from app/emr_config/api_requests.json."""
+        try:
+            if not cls.EMR_CONFIG_PATH.exists():
+                logger.warning(
+                    "[config] EMR config file not found at: %s",
+                    cls.EMR_CONFIG_PATH,
+                )
+                return {}
+
+            with cls.EMR_CONFIG_PATH.open("r", encoding="utf-8") as file:
+                data = json.load(file)
+
+            return data.get("emr", {}) or {}
+
+        except Exception as exc:
+            logger.exception(
+                "[config] Failed to load EMR config from %s | error=%s",
+                cls.EMR_CONFIG_PATH,
+                exc,
+            )
+            return {}
+
+    @staticmethod
+    def _configured_env(
+        auth_config: dict[str, Any],
+        key: str,
+        fallback_env: str,
+        default: str = "",
+    ) -> str:
+        """
+        Resolve value from dynamic env config.
+
+        Example:
+        key='client_id'
+        looks for:
+          client_id_env     -> env variable name
+          client_id_default -> fallback value
+        """
+        env_name = str(auth_config.get(f"{key}_env") or fallback_env)
+        configured_default = str(auth_config.get(f"{key}_default") or default or "")
+        return os.getenv(env_name, configured_default)
+
+    @staticmethod
+    def _configured_value(
+        auth_config: dict[str, Any],
+        key: str,
+        default: str = "",
+    ) -> str:
+        """Resolve direct value from api_requests.json auth section."""
+        return str(auth_config.get(key) or default or "")
+
+    @staticmethod
+    def _mask(value: str, visible_chars: int = 8) -> str:
+        """Mask sensitive values for logs."""
+        if not value:
+            return "NOT SET"
+        return f"SET ({value[:visible_chars]}...)"
+
+    # ═══════════════════════════════════════════════════════════════
+    # Logging
+    # ═══════════════════════════════════════════════════════════════
+
+    def log_startup_config(self) -> None:
+        """Log sanitized configuration at startup."""
+
+        logger.debug("[config] __file__        = %s", self.THIS_FILE)
+        logger.debug("[config] project root    = %s", self.ROOT_DIR)
+        logger.debug("[config] .env path       = %s", self.ENV_PATH)
+        logger.debug("[config] .env exists     = %s", self.ENV_PATH.exists())
+        logger.debug("[config] emr config path = %s", self.EMR_CONFIG_PATH)
+        logger.debug("[config] emr config exists = %s", self.EMR_CONFIG_PATH.exists())
+
+        logger.info("[config] EMR_NAME          = %s", self.EMR_NAME)
+        logger.info("[config] EMR_CLIENT_ID     = %s", self._mask(self.EMR_CLIENT_ID))
+        logger.info("[config] EMR_CLIENT_SECRET = %s", "SET (hidden)" if self.EMR_CLIENT_SECRET else "NOT SET")
+        logger.info("[config] EMR_REDIRECT_URI  = %s", self.EMR_REDIRECT_URI)
+        logger.info("[config] EMR_API_VERSION   = %s", self.EMR_API_VERSION)
+        logger.info("[config] EMR_AUTH_URL      = %s", self.EMR_AUTH_URL or "NOT SET")
+        logger.info("[config] EMR_TOKEN_URL     = %s", self.EMR_TOKEN_URL or "NOT SET")
+        logger.info("[config] EMR_API_BASE      = %s", self.EMR_API_BASE or "NOT SET")
+        logger.info("[config] FRONTEND_URL      = %s", self.FRONTEND_URL)
+        logger.info("[config] BACKEND_HOST      = %s", self.BACKEND_HOST)
+        logger.info("[config] BACKEND_PORT      = %s", self.BACKEND_PORT)
+        logger.info("[config] EMR_DAILY_LIMIT   = %s", self.EMR_DAILY_LIMIT)
+        logger.info("[config] EMR_MINUTE_LIMIT  = %s", self.EMR_MINUTE_LIMIT)
+
+    # ═══════════════════════════════════════════════════════════════
+    # Validation
+    # ═══════════════════════════════════════════════════════════════
+
+    def validate(self) -> None:
+        """Fail fast if required EMR credentials are missing."""
+
+        emr_config = self._load_emr_config()
+        auth_config = emr_config.get("auth", {}) if isinstance(emr_config, dict) else {}
+
+        client_id_env = str(auth_config.get("client_id_env") or "EMR_CLIENT_ID")
+        client_secret_env = str(auth_config.get("client_secret_env") or "EMR_CLIENT_SECRET")
+
+        missing = []
+
+        if not self.EMR_CLIENT_ID:
+            missing.append(client_id_env)
+
+        if not self.EMR_CLIENT_SECRET:
+            missing.append(client_secret_env)
+
+        if missing:
+            logger.critical("[config] MISSING required vars: %s", missing)
+            logger.critical("[config] Checked .env at: %s", self.ENV_PATH)
+
+            raise EnvironmentError(
+                f"Missing required environment variables: {', '.join(missing)}\n"
+                f"Expected .env at: {self.ENV_PATH}"
+            )
+
+        logger.info("[config] validate() PASSED ✓")
 
 
-def _configured_value(key: str, default: str = "") -> str:
-    return str(_AUTH_CFG.get(key) or default)
+# ═══════════════════════════════════════════════════════════════════
+# Singleton settings object
+# ═══════════════════════════════════════════════════════════════════
+
+settings = AppSettings()
 
 
-# ── Read values ────────────────────────────────────────────
-EMR_NAME:          str = str(_load_emr_config().get("name") or "EMR")
-EMR_CLIENT_ID:     str = _configured_env("client_id", "EMR_CLIENT_ID")
-EMR_CLIENT_SECRET: str = _configured_env("client_secret", "EMR_CLIENT_SECRET")
-EMR_REDIRECT_URI:  str = _configured_env("redirect_uri", "EMR_REDIRECT_URI", "http://localhost:8501")
+# ═══════════════════════════════════════════════════════════════════
+# Backward-compatible exports
+# Keep this so existing code does not break.
+# Example existing imports:
+# from app.core.config import EMR_CLIENT_ID, BACKEND_PORT, validate
+# ═══════════════════════════════════════════════════════════════════
 
-# Sent as the configured EMR API version header when the EMR requires one.
-EMR_API_VERSION:   str = _configured_env("api_version", "EMR_API_VERSION", "v4")
+EMR_NAME: str = settings.EMR_NAME
+EMR_CLIENT_ID: str = settings.EMR_CLIENT_ID
+EMR_CLIENT_SECRET: str = settings.EMR_CLIENT_SECRET
+EMR_REDIRECT_URI: str = settings.EMR_REDIRECT_URI
+EMR_API_VERSION: str = settings.EMR_API_VERSION
 
-FRONTEND_URL:   str = os.getenv("FRONTEND_URL",  "http://localhost:8501")
-BACKEND_HOST:   str = os.getenv("BACKEND_HOST",  "0.0.0.0")
-BACKEND_PORT:   int = int(os.getenv("BACKEND_PORT", "8000"))
+EMR_AUTH_URL: str = settings.EMR_AUTH_URL
+EMR_TOKEN_URL: str = settings.EMR_TOKEN_URL
+EMR_API_BASE: str = settings.EMR_API_BASE
 
-EMR_DAILY_LIMIT:  int = int(os.getenv("EMR_DAILY_LIMIT",  "500"))
-EMR_MINUTE_LIMIT: int = int(os.getenv("EMR_MINUTE_LIMIT", "29"))
+FRONTEND_URL: str = settings.FRONTEND_URL
+BACKEND_HOST: str = settings.BACKEND_HOST
+BACKEND_PORT: int = settings.BACKEND_PORT
 
-EMR_AUTH_URL:  str = _configured_value("authorize_url")
-EMR_TOKEN_URL: str = _configured_value("token_url")
-EMR_API_BASE:  str = _configured_value("api_base_url")
-
-# ── Trace log each value (sanitized) ──────────────────────
-_log.info(f"[config] EMR_NAME          = {EMR_NAME}")
-_log.info(f"[config] EMR_CLIENT_ID     = {'SET (' + EMR_CLIENT_ID[:8] + '...)' if EMR_CLIENT_ID else 'NOT SET'}")
-_log.info(f"[config] EMR_CLIENT_SECRET = {'SET (hidden)' if EMR_CLIENT_SECRET else 'NOT SET'}")
-_log.info(f"[config] EMR_REDIRECT_URI  = {EMR_REDIRECT_URI}")
-_log.info(f"[config] EMR_API_VERSION   = {EMR_API_VERSION}")
-_log.info(f"[config] FRONTEND_URL           = {FRONTEND_URL}")
-_log.info(f"[config] BACKEND_PORT           = {BACKEND_PORT}")
+EMR_DAILY_LIMIT: int = settings.EMR_DAILY_LIMIT
+EMR_MINUTE_LIMIT: int = settings.EMR_MINUTE_LIMIT
 
 
 def validate() -> None:
-    """Fail fast if required credentials are missing."""
-    client_id_env = str(_AUTH_CFG.get("client_id_env") or "EMR_CLIENT_ID")
-    client_secret_env = str(_AUTH_CFG.get("client_secret_env") or "EMR_CLIENT_SECRET")
-    missing = []
-    if not os.getenv(client_id_env, ""):
-        missing.append(client_id_env)
-    if not os.getenv(client_secret_env, ""):
-        missing.append(client_secret_env)
-    if missing:
-        _log.critical(f"[config] MISSING required vars: {missing}")
-        _log.critical(f"[config] Checked .env at: {_ENV_PATH}")
-        raise EnvironmentError(
-            f"Missing required environment variables: {', '.join(missing)}\n"
-            f"Expected .env at: {_ENV_PATH}"
-        )
-    _log.info("[config] validate() PASSED ✓")
+    """Backward-compatible validate function."""
+    settings.validate()
