@@ -13,7 +13,7 @@ from threading import Lock
 
 import httpx
 
-log = logging.getLogger("medisync.http_client")
+log = logging.getLogger("  http_client")
 
 
 class HTTPClientManager:

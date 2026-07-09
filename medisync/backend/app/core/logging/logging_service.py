@@ -24,10 +24,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
 from typing import Any, Optional
+from openpyxl import Workbook
 
 from loguru import logger
 
-from app.core.logger import LOG_DIR
+from      app.core.logging.logger import LOG_DIR
 
 INTEGRATION_LOG = LOG_DIR / "integration.log"
 FAILED_XLSX = LOG_DIR / "failed_records.xlsx"
@@ -213,8 +214,6 @@ class LoggingService:
 
     def _write_failed_xlsx(self) -> None:
         try:
-            from openpyxl import Workbook
-
             cols = ["run_id", "correlation_id", "timestamp", "file_name", "row",
                     "source_patient_id", "resource_type", "endpoint", "status_code",
                     "error_reason", "response_body", "request_payload"]

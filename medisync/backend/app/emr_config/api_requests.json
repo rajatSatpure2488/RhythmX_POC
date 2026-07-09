@@ -1,13 +1,57 @@
 {
   "emr": {
-    "name": "DrChrono"
+    "name": "DrChrono",
+    "display_name": "DrChrono EHR",
+    "auth": {
+      "client_id_env": "EMR_CLIENT_ID",
+      "client_secret_env": "EMR_CLIENT_SECRET",
+      "redirect_uri_env": "EMR_REDIRECT_URI",
+      "redirect_uri_default": "http://localhost:8501",
+      "authorize_url": "https://app.drchrono.com/o/authorize/",
+      "token_url": "https://app.drchrono.com/o/token/",
+      "api_base_url": "https://app.drchrono.com/api/",
+      "api_version_env": "EMR_API_VERSION",
+      "api_version_default": "v4",
+      "scopes": [
+        "user:read",
+        "user:write",
+        "calendar:read",
+        "calendar:write",
+        "patients:read",
+        "patients:write",
+        "patients:summary:read",
+        "patients:summary:write",
+        "billing:read",
+        "billing:write",
+        "clinical:read",
+        "clinical:write",
+        "labs:read",
+        "labs:write"
+      ],
+      "profile": {
+        "current_user_path": "users/current",
+        "provider_list_path": "doctors",
+        "provider_lookup_param": "user",
+        "user_id_path": "id",
+        "provider_results_path": "results",
+        "provider_id_path": "id",
+        "provider_first_name_path": "first_name",
+        "provider_last_name_path": "last_name",
+        "provider_name_prefix": "Dr.",
+        "headers": {
+          "Authorization": "Bearer {token}",
+          "Content-Type": "application/json",
+          "X-DRC-API-Version": "{api_version}"
+        }
+      }
+    }
   },
   "defaults": {
-    "base_url_config": "DRCHRONO_API_BASE",
+    "base_url_config": "EMR_API_BASE",
     "headers": {
       "Authorization": "Bearer {token}",
       "Content-Type": "application/json",
-      "X-DRC-API-Version": "{DRCHRONO_API_VERSION}"
+      "X-DRC-API-Version": "{api_version}"
     },
     "success_status_codes": [200, 201],
     "timeout_seconds": 20,
@@ -509,7 +553,7 @@
       "request_body": "multipart",
       "headers": {
         "Authorization": "Bearer {token}",
-        "X-DRC-API-Version": "{DRCHRONO_API_VERSION}"
+        "X-DRC-API-Version": "{api_version}"
       },
       "timeout_seconds": 60,
       "aliases": [

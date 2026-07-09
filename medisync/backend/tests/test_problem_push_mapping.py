@@ -3,15 +3,15 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from app.routes import push
-from app.routes.push import _map_record
+from      app.routes import push_data_router
+from      app.routes.push_data_router import _map_record
 
 
 def test_problem_tags_appointment_from_encounter_id_via_registry():
     """A condition tags to the appointment its encounter created, resolved from the
     persisted registry seeded into _APPT_ID_MAP (no encounter re-push needed)."""
     src = "5c857f24-1ceb-41f8-b46b-e713e8811703"
-    push._APPT_ID_MAP[src] = "401429530"
+    push_data_router._APPT_ID_MAP[src] = "401429530"
     try:
         payload = _map_record("condition", 
             {"encounter_id": src, "name_full": "Concentric LVH", "code": "I51.7",
@@ -21,7 +21,7 @@ def test_problem_tags_appointment_from_encounter_id_via_registry():
         )
         assert payload["appointment"] == 401429530
     finally:
-        push._APPT_ID_MAP.pop(src, None)
+        push_data_router._APPT_ID_MAP.pop(src, None)
 
 
 def test_problem_notes_fall_back_to_name_full():

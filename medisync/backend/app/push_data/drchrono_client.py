@@ -16,7 +16,7 @@ class DrChronoClient:
     """Wraps all DrChrono REST API calls.
 
     Every outgoing request includes the ``X-DRC-API-Version`` header
-    (value from ``config.DRCHRONO_API_VERSION``, currently ``v4`` / Hunt Valley)
+    (value from ``config.EMR_API_VERSION``, currently ``v4`` / Hunt Valley)
     so responses always come back in the expected schema.
     """
 
@@ -26,38 +26,38 @@ class DrChronoClient:
         return {
             "Authorization":      f"Bearer {access_token}",
             "Content-Type":       "application/json",
-            "X-DRC-API-Version":  config.DRCHRONO_API_VERSION,
+            "X-DRC-API-Version":  config.EMR_API_VERSION,
         }
 
     def get_authorization_url(self, scope: str) -> str:
         """Build the DrChrono OAuth authorization URL."""
         from urllib.parse import urlencode
-        if not config.DRCHRONO_CLIENT_ID:
-            raise HTTPException(status_code=500, detail="DRCHRONO_CLIENT_ID not configured")
-        if not config.DRCHRONO_REDIRECT_URI:
-            raise HTTPException(status_code=500, detail="DRCHRONO_REDIRECT_URI not configured")
+        if not config.EMR_CLIENT_ID:
+            raise HTTPException(status_code=500, detail="EMR_CLIENT_ID not configured")
+        if not config.EMR_REDIRECT_URI:
+            raise HTTPException(status_code=500, detail="EMR_REDIRECT_URI not configured")
 
         params = {
             "response_type": "code",
-            "client_id":     config.DRCHRONO_CLIENT_ID,
-            "redirect_uri":  config.DRCHRONO_REDIRECT_URI,
+            "client_id":     config.EMR_CLIENT_ID,
+            "redirect_uri":  config.EMR_REDIRECT_URI,
             "scope":         scope,
         }
-        return f"{config.DRCHRONO_AUTH_URL}?{urlencode(params)}"
+        return f"{config.EMR_AUTH_URL}?{urlencode(params)}"
 
     def exchange_code(self, auth_code: str) -> Dict:
         """Exchange an authorization code for access + refresh tokens."""
         payload = {
             "grant_type":    "authorization_code",
             "code":          auth_code,
-            "redirect_uri":  config.DRCHRONO_REDIRECT_URI,
-            "client_id":     config.DRCHRONO_CLIENT_ID,
-            "client_secret": config.DRCHRONO_CLIENT_SECRET,
+            "redirect_uri":  config.EMR_REDIRECT_URI,
+            "client_id":     config.EMR_CLIENT_ID,
+            "client_secret": config.EMR_CLIENT_SECRET,
         }
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
 
         response = HTTPClientManager.get_http_client().post(
-            config.DRCHRONO_TOKEN_URL,
+            config.EMR_TOKEN_URL,
             data=payload,
             headers=headers,
             timeout=30,
@@ -83,8 +83,8 @@ class DrChronoClient:
             "grant_type":    "password",
             "username":      username,
             "password":      password,
-            "client_id":     config.DRCHRONO_CLIENT_ID,
-            "client_secret": config.DRCHRONO_CLIENT_SECRET,
+            "client_id":     config.EMR_CLIENT_ID,
+            "client_secret": config.EMR_CLIENT_SECRET,
         }
         if scope:
             payload["scope"] = scope
@@ -92,7 +92,7 @@ class DrChronoClient:
 
         try:
             response = HTTPClientManager.get_http_client().post(
-                config.DRCHRONO_TOKEN_URL,
+                config.EMR_TOKEN_URL,
                 data=payload,
                 headers=headers,
                 timeout=30,
@@ -134,13 +134,13 @@ class DrChronoClient:
         payload = {
             "grant_type":    "refresh_token",
             "refresh_token": refresh_token,
-            "client_id":     config.DRCHRONO_CLIENT_ID,
-            "client_secret": config.DRCHRONO_CLIENT_SECRET,
+            "client_id":     config.EMR_CLIENT_ID,
+            "client_secret": config.EMR_CLIENT_SECRET,
         }
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
 
         response = HTTPClientManager.get_http_client().post(
-            config.DRCHRONO_TOKEN_URL,
+            config.EMR_TOKEN_URL,
             data=payload,
             headers=headers,
             timeout=30,
@@ -152,7 +152,7 @@ class DrChronoClient:
     def get_current_user(self, access_token: str) -> Dict:
         """Fetch the currently authenticated user profile."""
         response = HTTPClientManager.get_http_client().get(
-            f"{config.DRCHRONO_API_BASE}users/current",
+            f"{config.EMR_API_BASE}users/current",
             headers=self._api_headers(access_token),
             timeout=30,
         )
@@ -166,7 +166,7 @@ class DrChronoClient:
     def get_doctor_profile(self, access_token: str, user_id: str) -> Optional[Dict]:
         """Fetch the doctor profile linked to a user ID."""
         response = HTTPClientManager.get_http_client().get(
-            f"{config.DRCHRONO_API_BASE}doctors",
+            f"{config.EMR_API_BASE}doctors",
             headers=self._api_headers(access_token),
             params={"user": user_id},
             timeout=30,
@@ -189,7 +189,7 @@ class DrChronoClient:
             params["search"] = search
 
         response = HTTPClientManager.get_http_client().get(
-            f"{config.DRCHRONO_API_BASE}patients",
+            f"{config.EMR_API_BASE}patients",
             headers=self._api_headers(access_token),
             params=params,
             timeout=30,
@@ -200,7 +200,7 @@ class DrChronoClient:
     def get_patient_by_id(self, access_token: str, patient_id: str) -> Dict:
         """Get a single patient by ID."""
         response = HTTPClientManager.get_http_client().get(
-            f"{config.DRCHRONO_API_BASE}patients/{patient_id}",
+            f"{config.EMR_API_BASE}patients/{patient_id}",
             headers=self._api_headers(access_token),
             timeout=30,
         )

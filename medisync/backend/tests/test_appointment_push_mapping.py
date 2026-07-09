@@ -3,7 +3,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from app.routes.push import _map_record
+from      app.routes.push_data_router import _map_record
 
 
 def test_appointment_mapping_adds_optional_drchrono_enrichments():

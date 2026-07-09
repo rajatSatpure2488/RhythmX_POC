@@ -4,8 +4,8 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from app.services import logging_service as ls
-from app.services.logging_service import LoggingService
+from      app.core.logging import logging_service as ls
+from      app.core.logging.logging_service import LoggingService
 
 
 def _patient(svc, ok=True, status=201, **extra):

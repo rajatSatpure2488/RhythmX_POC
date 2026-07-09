@@ -2,7 +2,7 @@
 drchrono_proxy.py — Shared helper to proxy GET/POST to the real DrChrono API.
 Uses the stored OAuth token from token_store.
 
-All requests include X-DRC-API-Version (from config.DRCHRONO_API_VERSION)
+All requests include X-DRC-API-Version (from config.EMR_API_VERSION)
 so they target the correct DrChrono API version (currently v4 / Hunt Valley).
 
 NOTE: Documents endpoint requires multipart/form-data, not JSON.
@@ -17,9 +17,9 @@ from typing import Any, Dict, Optional
 from fastapi import HTTPException
 from app.core import config
 from app.core.http_client import HTTPClientManager
-from app.services.token_store import token_store
+from      app.core.token_store import token_store
 
-log = logging.getLogger("medisync.drchrono_proxy")
+log = logging.getLogger("  drchrono_proxy")
 
 SUPPORTED_DOCUMENT_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png", ".gif", ".bmp"}
 DOCUMENT_MIME_TYPES = {
@@ -51,7 +51,7 @@ def _build_headers(token: str) -> Dict:
     return {
         "Authorization":     f"Bearer {token}",
         "Content-Type":      "application/json",
-        "X-DRC-API-Version": config.DRCHRONO_API_VERSION,
+        "X-DRC-API-Version": config.EMR_API_VERSION,
     }
 
 
@@ -62,7 +62,7 @@ def _build_multipart_headers(token: str) -> Dict:
     """
     return {
         "Authorization":     f"Bearer {token}",
-        "X-DRC-API-Version": config.DRCHRONO_API_VERSION,
+        "X-DRC-API-Version": config.EMR_API_VERSION,
     }
 
 
@@ -118,7 +118,7 @@ def _prepare_document_upload(
 def drchrono_get(endpoint: str, params: Optional[Dict] = None) -> Any:
     """GET from DrChrono API. Returns JSON response."""
     token = _get_token()
-    url = f"{config.DRCHRONO_API_BASE}{endpoint}"
+    url = f"{config.EMR_API_BASE}{endpoint}"
     clean_params = {k: v for k, v in (params or {}).items() if v is not None}
     log.info(f"GET {url} params={clean_params}")
     resp = HTTPClientManager.get_http_client().get(url, headers=_build_headers(token), params=clean_params, timeout=30)
@@ -135,7 +135,7 @@ def drchrono_get(endpoint: str, params: Optional[Dict] = None) -> Any:
 def drchrono_post(endpoint: str, payload: Dict) -> Any:
     """POST to DrChrono API with JSON body. Returns JSON response."""
     token = _get_token()
-    url = f"{config.DRCHRONO_API_BASE}{endpoint}"
+    url = f"{config.EMR_API_BASE}{endpoint}"
     log.info(f"POST {url} keys={list(payload.keys())}")
     resp = HTTPClientManager.get_http_client().post(url, headers=_build_headers(token), json=payload, timeout=30)
     if resp.status_code >= 400:
@@ -181,7 +181,7 @@ def drchrono_post_document(
         Parsed JSON response from DrChrono
     """
     token = _get_token()
-    url = f"{config.DRCHRONO_API_BASE}documents"
+    url = f"{config.EMR_API_BASE}documents"
     filename, document_bytes, mime_type = _prepare_document_upload(
         filename,
         document_bytes,

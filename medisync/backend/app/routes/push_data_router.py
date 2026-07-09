@@ -15,22 +15,22 @@ from pydantic import BaseModel
 
 from app.core import config
 from app.routes.upload import _SESSION
-from app.services.token_store import token_store
-from app.services.drchrono_proxy import drchrono_post_document
-from app.services.logging_service import LoggingService, get_last_run, set_last_run
-from app.services.api_lookup_service import (
+from      app.core.token_store import token_store
+from      app.push_data.drchrono_proxy import drchrono_post_document
+from      app.core.logging.logging_service import LoggingService, get_last_run, set_last_run
+from      app.push_data.api_lookup_service import (
     cached_appointment_exists,
     find_existing_patient,
     get_appointment,
     get_default_office,
     lookup_appointment_id,
 )
-from app.services.api_request_client import (
+from      app.push_data.api_request_client import (
     build_payload_from_record,
     call_configured_api,
     format_api_error,
 )
-from app.services.push_config import (
+from      app.push_data.push_config import (
     ENDPOINT_MAP,
     PUSH_ORDER,
     api_config_for_resource,
@@ -48,7 +48,7 @@ from app.services.push_config import (
     should_aggregate_clinical_notes,
     should_skip_observation_note,
 )
-log = logging.getLogger("medisync.push")
+log = logging.getLogger("  push")
 
 
 def _endpoint_for(key: str) -> str:
@@ -1044,7 +1044,7 @@ def _refresh_access_token() -> Optional[str]:
     """Refresh the DrChrono access token via the stored refresh token (used on 401).
     Returns the new access token, or None if refresh isn't possible."""
     try:
-        from app.services.drchrono_client import drchrono_client
+        from      app.push_data.drchrono_client import drchrono_client
         tok = token_store.get_token()
         if not tok or not getattr(tok, "refresh_token", None):
             return None
@@ -2346,7 +2346,7 @@ def push_summary():
 @router.get("/failed-records.xlsx")
 def download_failed_records():
     """Download the failed_records.xlsx for the most recent run."""
-    from app.services.logging_service import FAILED_XLSX
+    from      app.core.logging.logging_service import FAILED_XLSX
 
     if not FAILED_XLSX.exists():
         raise HTTPException(status_code=404, detail="No failed_records.xlsx yet — run a push first.")

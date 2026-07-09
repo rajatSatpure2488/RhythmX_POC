@@ -15,9 +15,9 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from app.services.drchrono_proxy import drchrono_get
+from      app.push_data.drchrono_proxy import drchrono_get
 
-log = logging.getLogger("medisync.prerequisite_resolver")
+log = logging.getLogger("  prerequisite_resolver")
 
 
 class PrerequisiteCache:

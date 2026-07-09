@@ -4,9 +4,9 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from app.services.api_request_client import call_configured_api, get_emr_name, load_api_request_config
+from      app.push_data.api_request_client import call_configured_api, get_emr_name, load_api_request_config
 
-log = logging.getLogger("medisync.api_lookup")
+log = logging.getLogger("  api_lookup")
 
 _LOOKUP_CACHE: dict[tuple[Any, ...], Any] = {}
 

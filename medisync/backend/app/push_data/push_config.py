@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.services.api_request_client import (
+from      app.push_data.api_request_client import (
     ApiRequestConfigError,
     get_api_request,
     list_configured_api_requests,

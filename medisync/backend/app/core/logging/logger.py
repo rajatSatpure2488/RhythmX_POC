@@ -6,7 +6,7 @@ loguru via an InterceptHandler, so existing `logging.getLogger(...).info(...)` c
 are untouched but gain loguru's sinks:
 
   • console        — colorized, dev-friendly
-  • rotating file  — medisync/logs/medisync.log (5 MB rotation, zipped, 3 kept)
+  • rotating file  — medisync/logs/  log (5 MB rotation, zipped, 3 kept)
   • ring buffer    — last N records in memory, exposed to the UI via GET /logs/recent
                      and the API monitor (GET /logs/api)
 
@@ -26,7 +26,7 @@ from loguru import logger as _loguru
 # ── Paths ──────────────────────────────────────────────────
 LOG_DIR = Path(__file__).resolve().parents[3] / "logs"
 LOG_DIR.mkdir(exist_ok=True)
-LOG_FILE = LOG_DIR / "medisync.log"
+LOG_FILE = LOG_DIR / "  log"
 
 # ── In-memory ring buffer (what the UI reads) ──────────────
 _RECENT_MAXLEN = 1000

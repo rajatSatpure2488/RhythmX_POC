@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-from app.services.api_request_client import (
+from      app.push_data.api_request_client import (
     ApiRequestConfigError,
     build_payload_from_record,
     get_emr_name,

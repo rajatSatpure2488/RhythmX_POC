@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional
 from app.routes.upload import _SESSION
-from app.services.api_request_client import (
+from      app.push_data.api_request_client import (
     ApiRequestConfigError,
     _first_configured_value,
     get_api_request,

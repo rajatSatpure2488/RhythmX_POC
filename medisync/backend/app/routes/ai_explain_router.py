@@ -15,7 +15,7 @@ from pydantic import BaseModel
 
 from app.core.http_client import HTTPClientManager
 
-log = logging.getLogger("medisync.ai_explain")
+log = logging.getLogger("  ai_explain")
 router = APIRouter()
 
 # ── Request / Response models ──────────────────────────────────────────────────

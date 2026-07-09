@@ -39,7 +39,7 @@ print()
 print(SEP)
 print("STEP 4: Simulate DrChronoClient.get_authorization_url()")
 print(SEP)
-from app.services.drchrono_client import drchrono_client
+from      app.push_data.drchrono_client import drchrono_client
 try:
     url = drchrono_client.get_authorization_url("user:read")
     print("  auth_url (first 80 chars):", url[:80])

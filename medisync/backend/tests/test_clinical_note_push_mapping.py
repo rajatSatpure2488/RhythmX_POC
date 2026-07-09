@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from app.routes import push
+from      app.routes import push_data_router
 
 
 def test_vitals_payload_converts_metric_height_and_weight():
@@ -21,7 +21,7 @@ def test_vitals_payload_converts_metric_height_and_weight():
             "O2 Saturation: 98 % on room air"
         )
     }
-    vitals = push._build_vitals_payload(note)["vitals"]
+    vitals = push_data_router._build_vitals_payload(note)["vitals"]
 
     assert vitals["temperature"] == 98.4 and vitals["temperature_units"] == "f"
     assert vitals["height"] == 68.9 and vitals["height_units"] == "inches"
@@ -34,7 +34,7 @@ def test_vitals_payload_converts_metric_height_and_weight():
 def test_vitals_payload_passes_through_imperial_units():
     """Already-imperial source values must NOT be double-converted."""
     note = {"vital_signs": "Weight: 194 lbs  Height: 69 in  Temperature: 98.6 F"}
-    vitals = push._build_vitals_payload(note)["vitals"]
+    vitals = push_data_router._build_vitals_payload(note)["vitals"]
 
     assert vitals["weight"] == 194.0
     assert vitals["height"] == 69.0
@@ -61,7 +61,7 @@ def test_clinical_note_field_payloads_map_all_populated_sections():
         "lab_results": "BMP normal",
     }
 
-    payloads = push._clinical_note_field_payloads(note, 400645894)
+    payloads = push_data_router._clinical_note_field_payloads(note, 400645894)
     by_field = {p["clinical_note_field"]: p for p in payloads}
 
     assert by_field[206682180]["value"] == "1997-03-31T16:30:00Z"
@@ -73,7 +73,7 @@ def test_clinical_note_field_payloads_map_all_populated_sections():
 
 
 def test_build_vitals_payload_supports_drchrono_put_fields():
-    payload = push._build_vitals_payload({
+    payload = push_data_router._build_vitals_payload({
         "height": 67,
         "height_units": "inches",
         "weight": 158,
@@ -134,7 +134,7 @@ def test_push_clinical_note_patches_appointment_vitals_and_posts_field_values():
     with patch("app.routes.push.call_configured_api", side_effect=fake_configured_call) as mock_call, \
          patch("app.routes.push.requests.put") as mock_put, \
          patch("app.routes.push.requests.get", return_value=get_resp):
-        result = push._push_clinical_note_yellow_notepad(note, "token", doctor_id=525460, patient_id=134558544)
+        result = push_data_router._push_clinical_note_yellow_notepad(note, "token", doctor_id=525460, patient_id=134558544)
 
     assert result["success"] is True
     mock_put.assert_not_called()
@@ -161,8 +161,8 @@ def test_clinical_note_aggregation_preserves_csv_columns_for_field_values():
         }
     ]
 
-    note = push._aggregate_clinical_notes(records)[0]
-    payloads = push._clinical_note_field_payloads(note, note["appointment"])
+    note = push_data_router._aggregate_clinical_notes(records)[0]
+    payloads = push_data_router._clinical_note_field_payloads(note, note["appointment"])
     by_field = {p["clinical_note_field"]: p["value"] for p in payloads}
 
     assert note["provider_name"] == "Dr. Eleanor Vance, MD"
@@ -188,7 +188,7 @@ def test_clinical_note_field_payloads_use_actual_raw_csv_column_names():
         "laboratory_results": "BNP: 980 pg/mL",
     }
 
-    payloads = push._clinical_note_field_payloads(note, note["appointment"])
+    payloads = push_data_router._clinical_note_field_payloads(note, note["appointment"])
     by_field = {p["clinical_note_field"]: p["value"] for p in payloads}
 
     assert by_field[206682181] == "Dr. Ravi Agarwal"

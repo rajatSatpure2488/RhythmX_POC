@@ -17,11 +17,9 @@ import httpx
 
 from app.core import config
 from app.core.http_client import HTTPClientManager
+from app.core.config import EMR_CONFIG_PATH
 
-log = logging.getLogger("medisync.api_request_client")
-
-CONFIG_PATH = Path(__file__).resolve().parents[1] / "mappers" / "api_requests.json"
-
+log = logging.getLogger("  api_request_client")
 
 class ApiRequestConfigError(ValueError):
     """Raised when an API name or API request config is invalid."""
@@ -29,7 +27,7 @@ class ApiRequestConfigError(ValueError):
 
 @lru_cache(maxsize=1)
 def load_api_request_config() -> dict[str, Any]:
-    with CONFIG_PATH.open("r", encoding="utf-8") as f:
+    with EMR_CONFIG_PATH.open("r", encoding="utf-8") as f:
         data = json.load(f)
     if not isinstance(data.get("apis"), dict):
         raise ApiRequestConfigError("api_requests.json must contain an 'apis' object")
@@ -92,7 +90,8 @@ def list_configured_api_requests() -> list[dict[str, Any]]:
 def _render_headers(template: dict[str, str], token: str) -> dict[str, str]:
     values = {
         "token": token,
-        "DRCHRONO_API_VERSION": config.DRCHRONO_API_VERSION,
+        "api_version": config.EMR_API_VERSION,
+        "EMR_API_VERSION": config.EMR_API_VERSION,
     }
     return {key: str(value).format(**values) for key, value in template.items()}
 
@@ -101,7 +100,7 @@ def _build_url(
     path: str,
     path_params: Optional[dict[str, Any]] = None,
     *,
-    base_url_config: str = "DRCHRONO_API_BASE",
+    base_url_config: str = "EMR_API_BASE",
 ) -> str:
     rendered_path = path.format(**(path_params or {})).lstrip("/")
     base_url = str(getattr(config, base_url_config)).rstrip("/")
@@ -562,7 +561,7 @@ def call_configured_api(
     url = _build_url(
         api_cfg["path"],
         path_params,
-        base_url_config=str(api_cfg.get("base_url_config", "DRCHRONO_API_BASE")),
+        base_url_config=str(api_cfg.get("base_url_config", "EMR_API_BASE")),
     )
     method = str(api_cfg["method"]).upper()
 

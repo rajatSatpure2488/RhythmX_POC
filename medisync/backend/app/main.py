@@ -4,7 +4,7 @@ Entry point: loads config, registers routers, configures CORS.
 """
 
 # logger first — initializes the rotating file handler before anything else logs.
-from app.core import logger as _logger  # noqa: F401
+from      app.core.logging import logger as _logger  # noqa: F401
 # config must be imported next — it loads .env at module level
 from app.core import config
 
@@ -12,7 +12,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.http_client import HTTPClientManager
-from app.routes import auth, upload, mapping, dryrun, push, ai_explain, drchrono, logs
+from app.routes import upload
+from      app.push_data.emr_auth_client import emr_auth_client
+from      app.routes import ai_explain_router, auth_router, dryrun_router, execute_mapping_router, logs_router, push_data_router
 
 # # ── FHIR Pipeline (independent module — delete this block to remove) ──
 # try:
@@ -47,7 +49,7 @@ from app.routes import auth, upload, mapping, dryrun, push, ai_explain, drchrono
 
 app = FastAPI(
     title="MediSync API",
-    description="Clinical Notes Integration Platform — DrChrono EHR",
+    description="Clinical Notes Integration Platform",
     version="1.0.0",
 )
 
@@ -72,14 +74,14 @@ app.add_middleware(
 )
 
 # Routers
-app.include_router(auth.router,    prefix="/auth",    tags=["Authentication"])
+app.include_router(auth_router.router,    prefix="/auth",    tags=["Authentication"])
 app.include_router(upload.router,  prefix="/upload",  tags=["Upload"])
-app.include_router(mapping.router, prefix="/mapping", tags=["Mapping"])
-app.include_router(dryrun.router,  prefix="/dryrun",  tags=["DryRun"])
-app.include_router(push.router,       prefix="/push",    tags=["Push"])
-app.include_router(ai_explain.router, prefix="/ai",      tags=["AI Assistant"])
-app.include_router(drchrono.router,   prefix="/drchrono", tags=["DrChrono Resources"])
-app.include_router(logs.router,       prefix="/logs",     tags=["Logs"])
+app.include_router(execute_mapping_router.router, prefix="/mapping", tags=["Mapping"])
+app.include_router(dryrun_router.router,  prefix="/dryrun",  tags=["DryRun"])
+app.include_router(push_data_router.router,       prefix="/push",    tags=["Push"])
+app.include_router(ai_explain_router.router, prefix="/ai",      tags=["AI Assistant"])
+# app.include_router(drchrono.router,   prefix="/drchrono", tags=["DrChrono Resources"])
+app.include_router(logs_router.router,       prefix="/logs",     tags=["Logs"])
 
 # if _FHIR_PROXY_AVAILABLE and fhir_proxy_router is not None:
 #     app.include_router(fhir_proxy_router, prefix="/fhir-proxy", tags=["FHIR Proxy"])
@@ -104,7 +106,7 @@ async def startup_event():
     except Exception as e:
         import logging
         logging.getLogger("medisync").warning(
-            f"[startup] Missing DrChrono credentials — running in dev/demo mode. {e}"
+            f"[startup] Missing {emr_auth_client.emr_name} credentials — running in dev/demo mode. {e}"
         )
 
 
@@ -120,7 +122,8 @@ async def health_check():
         "status":        "ok",
         "service":       "MediSync API",
         "version":       "1.0.0",
-        "ehr_connected": bool(config.DRCHRONO_CLIENT_ID),
+        "ehr_connected": bool(emr_auth_client.value("client_id")),
+        "emr_name":      emr_auth_client.emr_name,
     }
 
 

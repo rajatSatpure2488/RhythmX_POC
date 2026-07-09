@@ -20,7 +20,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from app.mappers import MAPPER_REGISTRY, get_mapper, list_supported
+from      app.push_data import MAPPER_REGISTRY, get_mapper, list_supported
 
 router = APIRouter()
 
@@ -92,7 +92,7 @@ async def transform_batch(req: BatchTransformRequest):
     # Auto-resolve prerequisites if no context provided and auto_resolve is on
     if not ctx and req.auto_resolve:
         try:
-            from app.services.prerequisite_resolver import resolve_all
+            from      app.push_data.prerequisite_resolver import resolve_all
             ctx = resolve_all()
         except Exception:
             pass  # Proceed without auto-resolved context
@@ -140,21 +140,21 @@ async def get_all_prerequisites():
 
     Requires: active EMR OAuth session.
     """
-    from app.services.prerequisite_resolver import resolve_all
+    from      app.push_data.prerequisite_resolver import resolve_all
     return resolve_all()
 
 
 @router.get("/prerequisites/doctor", summary="Resolve doctor_id")
 async def get_doctor_prerequisite():
     """GET /api/users/current → doctor_id, doctor_name."""
-    from app.services.prerequisite_resolver import resolve_doctor
+    from      app.push_data.prerequisite_resolver import resolve_doctor
     return resolve_doctor()
 
 
 @router.get("/prerequisites/office", summary="Resolve office_id")
 async def get_office_prerequisite():
     """GET /api/offices → office_id, exam_room."""
-    from app.services.prerequisite_resolver import resolve_office
+    from      app.push_data.prerequisite_resolver import resolve_office
     return resolve_office()
 
 
@@ -164,28 +164,28 @@ async def get_field_types_prerequisite(clinical_note_template: Optional[int] = N
 
     Optional: Pass clinical_note_template to filter by template.
     """
-    from app.services.prerequisite_resolver import resolve_field_types
+    from      app.push_data.prerequisite_resolver import resolve_field_types
     return resolve_field_types(clinical_note_template)
 
 
 @router.get("/prerequisites/vaccine-inventory", summary="Resolve vaccine_inventory_id")
 async def get_vaccine_inventory_prerequisite():
     """GET /api/inventory_vaccines → vaccine_inventory_id + CVX→id map for R12."""
-    from app.services.prerequisite_resolver import resolve_vaccine_inventory
+    from      app.push_data.prerequisite_resolver import resolve_vaccine_inventory
     return resolve_vaccine_inventory()
 
 
 @router.get("/prerequisites/sublabs", summary="Resolve sublab_id")
 async def get_sublabs_prerequisite():
     """GET /api/sublabs → sublab_id for R14 (DiagnosticReport)."""
-    from app.services.prerequisite_resolver import resolve_sublabs
+    from      app.push_data.prerequisite_resolver import resolve_sublabs
     return resolve_sublabs()
 
 
 @router.get("/prerequisites/task-categories", summary="Resolve task_category_id")
 async def get_task_categories_prerequisite():
     """GET /api/task_categories → task_category_id for R11 (ServiceRequest)."""
-    from app.services.prerequisite_resolver import resolve_task_categories
+    from      app.push_data.prerequisite_resolver import resolve_task_categories
     return resolve_task_categories()
 
 
@@ -194,6 +194,6 @@ async def clear_prerequisites():
     """Clear the in-memory prerequisite cache.
     Call this after re-authentication or credential rotation.
     """
-    from app.services.prerequisite_resolver import clear_cache
+    from      app.push_data.prerequisite_resolver import clear_cache
     clear_cache()
     return {"status": "ok", "message": "Prerequisite cache cleared"}

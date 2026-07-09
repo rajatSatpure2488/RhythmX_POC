@@ -10,19 +10,19 @@ from typing import Optional
 # ── Auth ──────────────────────────────────────────────────
 
 class ManualTokenRequest(BaseModel):
-    access_token: str = Field(..., description="DrChrono Bearer access token")
-    doctor_id: str    = Field(..., description="DrChrono doctor profile ID")
+    access_token: str = Field(..., description="EMR Bearer access token")
+    doctor_id: str    = Field(..., description="EMR provider profile ID")
 
 
 class OAuthInitiateResponse(BaseModel):
-    auth_url: str     = Field(..., description="Full DrChrono OAuth authorization URL")
+    auth_url: str     = Field(..., description="Full EMR OAuth authorization URL")
 
 
 class AuthStatusResponse(BaseModel):
     connected:      bool            = False
     doctor_id:      Optional[str]   = None
     doctor_name:    Optional[str]   = None
-    target_system:  str             = "DrChrono EHR"
+    target_system:  str             = "EMR"
     expires_in:     Optional[int]   = None   # seconds remaining
     last_handshake: Optional[str]   = None   # "HH:MM PST" string
     error:          Optional[str]   = None
@@ -34,7 +34,7 @@ class TokenData(BaseModel):
     expires_at:    float          # Unix timestamp
     doctor_id:     Optional[str] = None
     doctor_name:   Optional[str] = None
-    target_system: str = "DrChrono EHR"
+    target_system: str = "EMR"
 
 
 # ── Upload (stubs for later stages) ───────────────────────

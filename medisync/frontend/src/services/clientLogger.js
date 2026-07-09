@@ -1,7 +1,7 @@
 /**
  * clientLogger.js — ships browser-side events to the backend log file.
  *
- * Why: backend already writes to medisync/logs/medisync.log via core/logger.py.
+ * Why: backend already writes to medisync/logs/  log via core/logger.py.
  * This module mirrors important frontend events into the same file so a single
  * `tail -f` shows the whole system.
  *

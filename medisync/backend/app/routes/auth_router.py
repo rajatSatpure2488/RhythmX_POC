@@ -1,57 +1,26 @@
 """
 MediSync — /auth router
-OAuth 2.0 and manual token endpoints for DrChrono EHR authentication.
-Uses config module (loads .env at import time) and shared HTTPX client.
+OAuth 2.0 and manual token endpoints for configured EMR authentication.
 """
 
 import logging
 from datetime import datetime, timezone
-from typing import Optional
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
 from app.core import config
-from app.models.schemas import (
+from      app.core.schemas import (
     ManualTokenRequest,
     OAuthInitiateResponse,
     AuthStatusResponse,
 )
-from app.services.token_store import token_store
-from app.services.drchrono_client import drchrono_client
+from      app.core.token_store import token_store
+from      app.push_data.emr_auth_client import emr_auth_client
 
 router = APIRouter()
-log = logging.getLogger("medisync.auth")
-
-# DrChrono OAuth scopes
-# NOTE: labs:read/labs:write are REQUIRED for the lab API endpoints
-# (/api/lab_results, /api/lab_orders, /api/lab_documents) used to push
-# diagnostic reports. Without them DrChrono returns 403
-# "You do not have permission to perform this action." After changing this,
-# the user MUST re-authenticate (disconnect + reconnect) so a new token is
-# issued with the added scope — existing tokens are NOT upgraded in place.
-# DRCHRONO_SCOPES = (
-#     "user:read patients:read patients:write "
-#     "clinical:read clinical:write calendar:read calendar:write "
-#     "labs:read labs:write billing:read billing:write"
-# )
-DRCHRONO_SCOPES = (
-    "user:read "
-    "user:write "
-    "calendar:read "
-    "calendar:write "
-    "patients:read "
-    "patients:write "
-    "patients:summary:read "
-    "patients:summary:write "
-    "billing:read "
-    "billing:write "
-    "clinical:read "
-    "clinical:write "
-    "labs:read "
-    "labs:write"
-)
+log = logging.getLogger("  auth")
 
 
 def _handshake_str() -> str:
@@ -59,19 +28,32 @@ def _handshake_str() -> str:
     return datetime.now(timezone.utc).strftime("%H:%M UTC")
 
 
+def _clear_prerequisite_cache() -> None:
+    try:
+        from      app.push_data.prerequisite_resolver import clear_cache
+        clear_cache()
+    except ImportError:
+        pass
+
+
 # ── GET /auth/debug ──────────────────────────────────────
 @router.get("/debug")
 def auth_debug():
     """Returns sanitized config state — use to diagnose CLIENT_ID missing errors."""
-    from pathlib import Path
     env_path = Path(config.__file__).resolve().parents[2] / ".env"
+    client_id = emr_auth_client.value("client_id")
     return {
         "env_file_path":         str(env_path),
         "env_file_exists":       env_path.exists(),
-        "client_id_set":         bool(config.DRCHRONO_CLIENT_ID),
-        "client_id_prefix":      config.DRCHRONO_CLIENT_ID[:8] + "..." if config.DRCHRONO_CLIENT_ID else "EMPTY",
-        "client_secret_set":     bool(config.DRCHRONO_CLIENT_SECRET),
-        "redirect_uri":          config.DRCHRONO_REDIRECT_URI,
+        "emr_name":              emr_auth_client.emr_name,
+        "target_system":         emr_auth_client.display_name,
+        "client_id_set":         bool(client_id),
+        "client_id_prefix":      client_id[:8] + "..." if client_id else "EMPTY",
+        "client_secret_set":     bool(emr_auth_client.value("client_secret")),
+        "redirect_uri":          emr_auth_client.value("redirect_uri"),
+        "authorize_url":         emr_auth_client.value("authorize_url"),
+        "token_url_set":         bool(emr_auth_client.value("token_url")),
+        "scopes":                emr_auth_client.scopes(),
         "frontend_url":          config.FRONTEND_URL,
         "config_module_file":    str(config.__file__),
     }
@@ -81,12 +63,11 @@ def auth_debug():
 @router.get("/oauth/initiate", response_model=OAuthInitiateResponse)
 def oauth_initiate():
     """
-    Generate the DrChrono OAuth 2.0 authorization URL.
+    Generate the configured EMR OAuth 2.0 authorization URL.
     Frontend does a full-page redirect to this URL (same tab).
-    DrChrono redirects back to DRCHRONO_REDIRECT_URI (http://localhost:8501)
-    with ?code=... — the React app then POSTs the code to /auth/oauth/exchange.
+    The EMR redirects back with ?code=..., then the React app calls /auth/oauth/exchange.
     """
-    auth_url = drchrono_client.get_authorization_url(DRCHRONO_SCOPES)
+    auth_url = emr_auth_client.get_authorization_url()
     return OAuthInitiateResponse(auth_url=auth_url)
 
 
@@ -106,29 +87,19 @@ def _finalize_login(token_data: dict) -> AuthStatusResponse:
     expires_in    = token_data.get("expires_in", 172800)
 
     if not access_token:
-        raise HTTPException(status_code=400, detail="DrChrono did not return an access_token")
+        raise HTTPException(status_code=400, detail=f"{emr_auth_client.emr_name} did not return an access_token")
 
-    # Fetch doctor profile (auth still succeeds even if this fails)
+    # Fetch provider profile (auth still succeeds even if this fails)
     doctor_name = None
     doctor_id   = None
     try:
-        user_info = drchrono_client.get_current_user(access_token)
-        user_id   = str(user_info.get("id", ""))
-        doctor    = drchrono_client.get_doctor_profile(access_token, user_id)
-        if doctor:
-            doctor_id   = str(doctor.get("id", ""))
-            first       = doctor.get("first_name", "")
-            last        = doctor.get("last_name", "")
-            doctor_name = f"Dr. {first} {last}".strip()
+        user_info = emr_auth_client.get_current_user(access_token)
+        provider = emr_auth_client.get_provider_profile(access_token, user_info)
+        doctor_id, doctor_name = emr_auth_client.provider_identity(provider)
     except Exception:
         pass
 
-    # Clear prerequisite cache from a previous session
-    try:
-        from app.services.prerequisite_resolver import clear_cache
-        clear_cache()
-    except ImportError:
-        pass
+    _clear_prerequisite_cache()
 
     token_store.set_token(
         access_token=access_token,
@@ -136,12 +107,14 @@ def _finalize_login(token_data: dict) -> AuthStatusResponse:
         refresh_token=refresh_token,
         doctor_id=doctor_id,
         doctor_name=doctor_name,
+        target_system=emr_auth_client.display_name,
     )
 
     return AuthStatusResponse(
         connected=True,
         doctor_id=doctor_id,
         doctor_name=doctor_name,
+        target_system=emr_auth_client.display_name,
         expires_in=token_store.seconds_until_expiry(),
         last_handshake=_handshake_str(),
     )
@@ -150,10 +123,10 @@ def _finalize_login(token_data: dict) -> AuthStatusResponse:
 @router.post("/oauth/exchange", response_model=AuthStatusResponse)
 def oauth_exchange(req: ExchangeRequest):
     """
-    Called by the React frontend after DrChrono redirects to http://localhost:8501?code=...
+    Called by the React frontend after the configured EMR redirects with ?code=...
     Exchanges the code for tokens and stores them.
     """
-    token_data = drchrono_client.exchange_code(req.code)
+    token_data = emr_auth_client.exchange_code(req.code)
     return _finalize_login(token_data)
 
 
@@ -165,12 +138,12 @@ class LoginRequest(BaseModel):
 
 @router.post("/login", response_model=AuthStatusResponse)
 def login_with_password(req: LoginRequest):
-    """Log in with a DrChrono username + password (OAuth2 password grant).
+    """Log in with an EMR username + password when the configured EMR allows it.
 
     Runs the SAME token-exchange + storage process as the OAuth redirect flow,
     just obtaining the token from credentials instead of an auth code.
     """
-    token_data = drchrono_client.password_grant(req.username, req.password, DRCHRONO_SCOPES)
+    token_data = emr_auth_client.password_grant(req.username, req.password)
     return _finalize_login(token_data)
 
 
@@ -179,39 +152,32 @@ def login_with_password(req: LoginRequest):
 def manual_token(req: ManualTokenRequest):
     """
     Accept a manually provided access token + doctor ID.
-    Attempts to validate by calling DrChrono user info endpoint.
+    Attempts to validate by calling the configured EMR user info endpoint.
     """
     doctor_name = None
     try:
-        user_info = drchrono_client.get_current_user(req.access_token)
-        user_id   = str(user_info.get("id", ""))
-        doctor    = drchrono_client.get_doctor_profile(req.access_token, user_id)
-        if doctor:
-            first       = doctor.get("first_name", "")
-            last        = doctor.get("last_name", "")
-            doctor_name = f"Dr. {first} {last}".strip()
+        user_info = emr_auth_client.get_current_user(req.access_token)
+        provider = emr_auth_client.get_provider_profile(req.access_token, user_info)
+        _, doctor_name = emr_auth_client.provider_identity(provider)
     except HTTPException as e:
         if e.status_code == 401:
             raise HTTPException(status_code=401, detail="Invalid or expired access token")
 
-    # Clear prerequisite cache from previous session
-    try:
-        from app.services.prerequisite_resolver import clear_cache
-        clear_cache()
-    except ImportError:
-        pass
+    _clear_prerequisite_cache()
 
     token_store.set_token(
         access_token=req.access_token,
         expires_in=172800,
         doctor_id=req.doctor_id,
         doctor_name=doctor_name,
+        target_system=emr_auth_client.display_name,
     )
 
     return AuthStatusResponse(
         connected=True,
         doctor_id=req.doctor_id,
         doctor_name=doctor_name,
+        target_system=emr_auth_client.display_name,
         expires_in=token_store.seconds_until_expiry(),
         last_handshake=_handshake_str(),
     )
@@ -248,6 +214,7 @@ def auth_token():
     return {
         "access_token": token.access_token,
         "doctor_id": token.doctor_id,
+        "target_system": token.target_system,
         "expires_in_seconds": token_store.seconds_until_expiry()
     }
 
@@ -264,11 +231,11 @@ def auth_refresh():
             detail="No refresh token available. Please re-authenticate.",
         )
 
-    token_data = drchrono_client.refresh_token(token.refresh_token)
+    token_data = emr_auth_client.refresh_token(token.refresh_token)
 
     new_access = token_data.get("access_token")
     if not new_access:
-        raise HTTPException(status_code=401, detail="DrChrono refresh did not return an access_token")
+        raise HTTPException(status_code=401, detail=f"{emr_auth_client.emr_name} refresh did not return an access_token")
 
     token_store.set_token(
         access_token=new_access,
@@ -276,12 +243,14 @@ def auth_refresh():
         refresh_token=token_data.get("refresh_token", token.refresh_token),
         doctor_id=token.doctor_id,
         doctor_name=token.doctor_name,
+        target_system=token.target_system,
     )
 
     return AuthStatusResponse(
         connected=True,
         doctor_id=token.doctor_id,
         doctor_name=token.doctor_name,
+        target_system=token.target_system,
         expires_in=token_store.seconds_until_expiry(),
         last_handshake=_handshake_str(),
     )

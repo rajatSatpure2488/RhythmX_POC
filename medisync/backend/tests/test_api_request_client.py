@@ -6,7 +6,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
 
-from app.services.api_request_client import (
+from      app.push_data.api_request_client import (
     ApiRequestConfigError,
     build_payload_from_record,
     call_configured_api,

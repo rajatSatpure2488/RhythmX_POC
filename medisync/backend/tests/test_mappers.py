@@ -6,7 +6,7 @@ import pytest
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from app.mappers import MAPPER_REGISTRY, get_mapper, list_supported
+from      app.push_data import MAPPER_REGISTRY, get_mapper, list_supported
 from app.mappers.base_mapper import MapperResult
 
 # ─── Shared context used by most tests ────────────────────────────────────────
