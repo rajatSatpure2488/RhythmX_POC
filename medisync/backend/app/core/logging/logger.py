@@ -41,48 +41,60 @@ _API_RESP_RE = re.compile(r"DrChrono response|-> \d{3}\b|status=\d{3}\b", re.IGN
 
 def _buffer_sink(message: Any) -> None:
     """loguru sink: append each record to the in-memory ring buffer."""
-    r = message.record
-    msg = r["message"]
-    is_api = bool(_API_CALL_RE.search(msg))
-    with _recent_lock:
-        _recent.append({
-            "time": r["time"].astimezone(timezone.utc).isoformat(timespec="seconds"),
-            "ts": r["time"].timestamp(),
-            "level": r["level"].name,
-            "name": r["extra"].get("std_name") or r["name"],
-            "message": msg,
-            "api_call": is_api,
-            "api_response": bool(_API_RESP_RE.search(msg)),
-        })
+    try:
+        r = message.record
+        msg = r["message"]
+        is_api = bool(_API_CALL_RE.search(msg))
+        with _recent_lock:
+            _recent.append({
+                "time": r["time"].astimezone(timezone.utc).isoformat(timespec="seconds"),
+                "ts": r["time"].timestamp(),
+                "level": r["level"].name,
+                "name": r["extra"].get("std_name") or r["name"],
+                "message": msg,
+                "api_call": is_api,
+                "api_response": bool(_API_RESP_RE.search(msg)),
+            })
+    except Exception as exc:
+        _loguru.error(f"Exception in {__name__}._buffer_sink: {exc}")
+        raise
 
 
 def get_recent_logs(limit: int = 200, level: Optional[str] = None,
                     name_contains: Optional[str] = None) -> list[dict]:
     """Recent log entries for the UI log viewer, newest last."""
-    with _recent_lock:
-        items = list(_recent)
-    if level:
-        wanted = level.upper()
-        items = [e for e in items if e["level"] == wanted]
-    if name_contains:
-        items = [e for e in items if name_contains in e["name"]]
-    return items[-limit:]
+    try:
+        with _recent_lock:
+            items = list(_recent)
+        if level:
+            wanted = level.upper()
+            items = [e for e in items if e["level"] == wanted]
+        if name_contains:
+            items = [e for e in items if name_contains in e["name"]]
+        return items[-limit:]
+    except Exception as exc:
+        _loguru.error(f"Exception in {__name__}.get_recent_logs: {exc}")
+        raise
 
 
 def get_api_monitor(limit: int = 100, window_seconds: int = 60, rate_limit: int = 29) -> dict:
     """API-call activity derived from the log buffer: recent calls + calls/min rate."""
-    with _recent_lock:
-        items = list(_recent)
-    calls = [e for e in items if e["api_call"] or e["api_response"]]
-    cutoff = (datetime.now(timezone.utc) - timedelta(seconds=window_seconds)).timestamp()
-    used = sum(1 for e in calls if e["api_call"] and e["ts"] >= cutoff)
-    return {
-        "calls": calls[-limit:],
-        "window_seconds": window_seconds,
-        "rate_limit": rate_limit,
-        "used": used,
-        "pct": min(round(used / rate_limit * 100), 100) if rate_limit else 0,
-    }
+    try:
+        with _recent_lock:
+            items = list(_recent)
+        calls = [e for e in items if e["api_call"] or e["api_response"]]
+        cutoff = (datetime.now(timezone.utc) - timedelta(seconds=window_seconds)).timestamp()
+        used = sum(1 for e in calls if e["api_call"] and e["ts"] >= cutoff)
+        return {
+            "calls": calls[-limit:],
+            "window_seconds": window_seconds,
+            "rate_limit": rate_limit,
+            "used": used,
+            "pct": min(round(used / rate_limit * 100), 100) if rate_limit else 0,
+        }
+    except Exception as exc:
+        _loguru.error(f"Exception in {__name__}.get_api_monitor: {exc}")
+        raise
 
 
 # ── loguru sinks ───────────────────────────────────────────
@@ -107,6 +119,15 @@ class _InterceptHandler(logging.Handler):
     preserving the original logger name in extra[std_name]."""
 
     def emit(self, record: logging.LogRecord) -> None:
+        """Forward a stdlib logging record into loguru.
+
+        Parameters:
+            record: Standard-library ``LogRecord`` emitted by any backend module.
+
+        Use case:
+            Keeps FastAPI, uvicorn, and application logs visible through the same
+            terminal/file logging pipeline.
+        """
         try:
             level = _loguru.level(record.levelname).name
         except ValueError:

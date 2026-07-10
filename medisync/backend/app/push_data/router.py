@@ -16,6 +16,7 @@ Endpoints:
 """
 from __future__ import annotations
 
+from loguru import logger as loguru_logger
 from typing import Any, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -26,11 +27,31 @@ router = APIRouter()
 
 
 class TransformRequest(BaseModel):
+    """Request body for transforming one resource.
+
+    Parameters:
+        fhir_resource: Source resource/row to map into an EMR payload.
+        context: Optional runtime IDs such as patient, doctor, office, appointment.
+
+    Use case:
+        Lets developers preview one config-backed payload transform.
+    """
     fhir_resource: dict[str, Any]
     context: Optional[dict[str, Any]] = None
 
 
 class BatchTransformRequest(BaseModel):
+    """Request body for transforming multiple resources.
+
+    Parameters:
+        resources: List of source resources/rows to transform.
+        context: Optional runtime IDs shared across all records.
+        auto_resolve: Whether prerequisites should be resolved automatically when
+            context is missing.
+
+    Use case:
+        Supports batch mapper preview/validation before records are pushed.
+    """
     resources: list[dict[str, Any]]
     context: Optional[dict[str, Any]] = None
     auto_resolve: bool = True  # Auto-resolve prerequisites if context is empty
@@ -43,12 +64,16 @@ class BatchTransformRequest(BaseModel):
 @router.get("/status")
 async def mapper_status():
     """List all supported config-driven EMR mappers."""
-    return {
-        "module": "config_based_mapper",
-        "description": "Configuration-driven EMR API Mapper",
-        "total_mappers": len(MAPPER_REGISTRY),
-        "mappers": list_supported(),
-    }
+    try:
+        return {
+            "module": "config_based_mapper",
+            "description": "Configuration-driven EMR API Mapper",
+            "total_mappers": len(MAPPER_REGISTRY),
+            "mappers": list_supported(),
+        }
+    except Exception as exc:
+        loguru_logger.error(f"Exception in {__name__}.mapper_status: {exc}")
+        raise
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -67,16 +92,20 @@ async def transform_resource(resource_type: str, req: TransformRequest):
         context: Optional runtime IDs (doctor_id, patient_id, office_id, etc.)
                  If omitted, call GET /mapper/prerequisites first.
     """
-    mapper = get_mapper(resource_type)
-    if not mapper:
-        supported = list(MAPPER_REGISTRY.keys())
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unsupported resource type: '{resource_type}'. Supported: {supported}",
-        )
+    try:
+        mapper = get_mapper(resource_type)
+        if not mapper:
+            supported = list(MAPPER_REGISTRY.keys())
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported resource type: '{resource_type}'. Supported: {supported}",
+            )
 
-    result = mapper.transform(req.fhir_resource, context=req.context)
-    return result.to_dict()
+        result = mapper.transform(req.fhir_resource, context=req.context)
+        return result.to_dict()
+    except Exception as exc:
+        loguru_logger.error(f"Exception in {__name__}.transform_resource: {exc}")
+        raise
 
 
 @router.post("/transform-batch")
@@ -87,43 +116,47 @@ async def transform_batch(req: BatchTransformRequest):
     If auto_resolve=true (default) and no context is provided,
     prerequisites will be automatically resolved from the configured EMR.
     """
-    ctx = req.context or {}
+    try:
+        ctx = req.context or {}
 
-    # Auto-resolve prerequisites if no context provided and auto_resolve is on
-    if not ctx and req.auto_resolve:
-        try:
-            from      app.push_data.prerequisite_resolver import resolve_all
-            ctx = resolve_all()
-        except Exception:
-            pass  # Proceed without auto-resolved context
+        # Auto-resolve prerequisites if no context provided and auto_resolve is on
+        if not ctx and req.auto_resolve:
+            try:
+                from      app.push_data.prerequisite_resolver import resolve_all
+                ctx = resolve_all()
+            except Exception:
+                pass  # Proceed without auto-resolved context
 
-    results = []
-    for resource in req.resources:
-        rtype = resource.get("resourceType", "")
-        mapper = get_mapper(rtype)
-        if mapper:
-            result = mapper.transform(resource, context=ctx)
-            results.append(result.to_dict())
-        else:
-            results.append({
-                "success": False,
-                "resource_type": rtype or "Unknown",
-                "emr_endpoint": "",
-                "payload": {},
-                "errors": [f"No mapper for '{rtype}'"],
-                "warnings": [],
-            })
+        results = []
+        for resource in req.resources:
+            rtype = resource.get("resourceType", "")
+            mapper = get_mapper(rtype)
+            if mapper:
+                result = mapper.transform(resource, context=ctx)
+                results.append(result.to_dict())
+            else:
+                results.append({
+                    "success": False,
+                    "resource_type": rtype or "Unknown",
+                    "emr_endpoint": "",
+                    "payload": {},
+                    "errors": [f"No mapper for '{rtype}'"],
+                    "warnings": [],
+                })
 
-    success_count = sum(1 for r in results if r["success"])
-    return {
-        "total": len(results),
-        "success": success_count,
-        "failed": len(results) - success_count,
-        "context_used": {k: v for k, v in ctx.items()
-                         if k not in ("field_types", "sublabs", "categories",
-                                      "cvx_map", "resolved", "errors")},
-        "results": results,
-    }
+        success_count = sum(1 for r in results if r["success"])
+        return {
+            "total": len(results),
+            "success": success_count,
+            "failed": len(results) - success_count,
+            "context_used": {k: v for k, v in ctx.items()
+                             if k not in ("field_types", "sublabs", "categories",
+                                          "cvx_map", "resolved", "errors")},
+            "results": results,
+        }
+    except Exception as exc:
+        loguru_logger.error(f"Exception in {__name__}.transform_batch: {exc}")
+        raise
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -140,22 +173,34 @@ async def get_all_prerequisites():
 
     Requires: active EMR OAuth session.
     """
-    from      app.push_data.prerequisite_resolver import resolve_all
-    return resolve_all()
+    try:
+        from      app.push_data.prerequisite_resolver import resolve_all
+        return resolve_all()
+    except Exception as exc:
+        loguru_logger.error(f"Exception in {__name__}.get_all_prerequisites: {exc}")
+        raise
 
 
 @router.get("/prerequisites/doctor", summary="Resolve doctor_id")
 async def get_doctor_prerequisite():
     """GET /api/users/current → doctor_id, doctor_name."""
-    from      app.push_data.prerequisite_resolver import resolve_doctor
-    return resolve_doctor()
+    try:
+        from      app.push_data.prerequisite_resolver import resolve_doctor
+        return resolve_doctor()
+    except Exception as exc:
+        loguru_logger.error(f"Exception in {__name__}.get_doctor_prerequisite: {exc}")
+        raise
 
 
 @router.get("/prerequisites/office", summary="Resolve office_id")
 async def get_office_prerequisite():
     """GET /api/offices → office_id, exam_room."""
-    from      app.push_data.prerequisite_resolver import resolve_office
-    return resolve_office()
+    try:
+        from      app.push_data.prerequisite_resolver import resolve_office
+        return resolve_office()
+    except Exception as exc:
+        loguru_logger.error(f"Exception in {__name__}.get_office_prerequisite: {exc}")
+        raise
 
 
 @router.get("/prerequisites/field-types", summary="Resolve field_type_id")
@@ -164,29 +209,45 @@ async def get_field_types_prerequisite(clinical_note_template: Optional[int] = N
 
     Optional: Pass clinical_note_template to filter by template.
     """
-    from      app.push_data.prerequisite_resolver import resolve_field_types
-    return resolve_field_types(clinical_note_template)
+    try:
+        from      app.push_data.prerequisite_resolver import resolve_field_types
+        return resolve_field_types(clinical_note_template)
+    except Exception as exc:
+        loguru_logger.error(f"Exception in {__name__}.get_field_types_prerequisite: {exc}")
+        raise
 
 
 @router.get("/prerequisites/vaccine-inventory", summary="Resolve vaccine_inventory_id")
 async def get_vaccine_inventory_prerequisite():
     """GET /api/inventory_vaccines → vaccine_inventory_id + CVX→id map for R12."""
-    from      app.push_data.prerequisite_resolver import resolve_vaccine_inventory
-    return resolve_vaccine_inventory()
+    try:
+        from      app.push_data.prerequisite_resolver import resolve_vaccine_inventory
+        return resolve_vaccine_inventory()
+    except Exception as exc:
+        loguru_logger.error(f"Exception in {__name__}.get_vaccine_inventory_prerequisite: {exc}")
+        raise
 
 
 @router.get("/prerequisites/sublabs", summary="Resolve sublab_id")
 async def get_sublabs_prerequisite():
     """GET /api/sublabs → sublab_id for R14 (DiagnosticReport)."""
-    from      app.push_data.prerequisite_resolver import resolve_sublabs
-    return resolve_sublabs()
+    try:
+        from      app.push_data.prerequisite_resolver import resolve_sublabs
+        return resolve_sublabs()
+    except Exception as exc:
+        loguru_logger.error(f"Exception in {__name__}.get_sublabs_prerequisite: {exc}")
+        raise
 
 
 @router.get("/prerequisites/task-categories", summary="Resolve task_category_id")
 async def get_task_categories_prerequisite():
     """GET /api/task_categories → task_category_id for R11 (ServiceRequest)."""
-    from      app.push_data.prerequisite_resolver import resolve_task_categories
-    return resolve_task_categories()
+    try:
+        from      app.push_data.prerequisite_resolver import resolve_task_categories
+        return resolve_task_categories()
+    except Exception as exc:
+        loguru_logger.error(f"Exception in {__name__}.get_task_categories_prerequisite: {exc}")
+        raise
 
 
 @router.post("/prerequisites/clear", summary="Clear prerequisite cache")
@@ -194,6 +255,10 @@ async def clear_prerequisites():
     """Clear the in-memory prerequisite cache.
     Call this after re-authentication or credential rotation.
     """
-    from      app.push_data.prerequisite_resolver import clear_cache
-    clear_cache()
-    return {"status": "ok", "message": "Prerequisite cache cleared"}
+    try:
+        from      app.push_data.prerequisite_resolver import clear_cache
+        clear_cache()
+        return {"status": "ok", "message": "Prerequisite cache cleared"}
+    except Exception as exc:
+        loguru_logger.error(f"Exception in {__name__}.clear_prerequisites: {exc}")
+        raise

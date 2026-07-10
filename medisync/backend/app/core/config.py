@@ -10,9 +10,9 @@ Features:
 - Adds sanitized startup logs
 - Keeps backward-compatible module-level constants
 """
-
 from __future__ import annotations
 
+from loguru import logger as loguru_logger
 import json
 import logging
 import os
@@ -21,6 +21,7 @@ from typing import Any, ClassVar
 
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -117,60 +118,75 @@ class AppSettings(BaseSettings):
     EMR_API_BASE: str = ""
 
     def __init__(self, **values: Any):
-        super().__init__(**values)
+        """Initialize settings from env and EMR JSON config.
 
-        emr_config = self._load_emr_config()
-        auth_config = emr_config.get("auth", {}) if isinstance(emr_config, dict) else {}
+        Parameters:
+            values: Optional values supplied by Pydantic/BaseSettings during
+                initialization. Environment variables are also loaded by
+                ``BaseSettings``.
 
-        self.EMR_NAME = str(emr_config.get("name") or "EMR")
+        Use case:
+            Combines backend defaults, ``.env`` values, and ``api_requests.json``
+            into one settings object used by auth, push, and request clients.
+        """
+        try:
+            super().__init__(**values)
 
-        self.EMR_CLIENT_ID = self._configured_env(
-            auth_config=auth_config,
-            key="client_id",
-            fallback_env="EMR_CLIENT_ID",
-            default=self.EMR_CLIENT_ID,
-        )
+            emr_config = self._load_emr_config()
+            auth_config = emr_config.get("auth", {}) if isinstance(emr_config, dict) else {}
 
-        self.EMR_CLIENT_SECRET = self._configured_env(
-            auth_config=auth_config,
-            key="client_secret",
-            fallback_env="EMR_CLIENT_SECRET",
-            default=self.EMR_CLIENT_SECRET,
-        )
+            self.EMR_NAME = str(emr_config.get("name") or "EMR")
 
-        self.EMR_REDIRECT_URI = self._configured_env(
-            auth_config=auth_config,
-            key="redirect_uri",
-            fallback_env="EMR_REDIRECT_URI",
-            default=self.EMR_REDIRECT_URI,
-        )
+            self.EMR_CLIENT_ID = self._configured_env(
+                auth_config=auth_config,
+                key="client_id",
+                fallback_env="EMR_CLIENT_ID",
+                default=self.EMR_CLIENT_ID,
+            )
 
-        self.EMR_API_VERSION = self._configured_env(
-            auth_config=auth_config,
-            key="api_version",
-            fallback_env="EMR_API_VERSION",
-            default=self.EMR_API_VERSION,
-        )
+            self.EMR_CLIENT_SECRET = self._configured_env(
+                auth_config=auth_config,
+                key="client_secret",
+                fallback_env="EMR_CLIENT_SECRET",
+                default=self.EMR_CLIENT_SECRET,
+            )
 
-        self.EMR_AUTH_URL = self._configured_value(
-            auth_config=auth_config,
-            key="authorize_url",
-            default=self.EMR_AUTH_URL,
-        )
+            self.EMR_REDIRECT_URI = self._configured_env(
+                auth_config=auth_config,
+                key="redirect_uri",
+                fallback_env="EMR_REDIRECT_URI",
+                default=self.EMR_REDIRECT_URI,
+            )
 
-        self.EMR_TOKEN_URL = self._configured_value(
-            auth_config=auth_config,
-            key="token_url",
-            default=self.EMR_TOKEN_URL,
-        )
+            self.EMR_API_VERSION = self._configured_env(
+                auth_config=auth_config,
+                key="api_version",
+                fallback_env="EMR_API_VERSION",
+                default=self.EMR_API_VERSION,
+            )
 
-        self.EMR_API_BASE = self._configured_value(
-            auth_config=auth_config,
-            key="api_base_url",
-            default=self.EMR_API_BASE,
-        )
+            self.EMR_AUTH_URL = self._configured_value(
+                auth_config=auth_config,
+                key="authorize_url",
+                default=self.EMR_AUTH_URL,
+            )
 
-        self.log_startup_config()
+            self.EMR_TOKEN_URL = self._configured_value(
+                auth_config=auth_config,
+                key="token_url",
+                default=self.EMR_TOKEN_URL,
+            )
+
+            self.EMR_API_BASE = self._configured_value(
+                auth_config=auth_config,
+                key="api_base_url",
+                default=self.EMR_API_BASE,
+            )
+
+            self.log_startup_config()
+        except Exception as exc:
+            loguru_logger.error(f"Exception in {__name__}.__init__: {exc}")
+            raise
 
     # ═══════════════════════════════════════════════════════════════
     # Internal helpers
@@ -216,9 +232,13 @@ class AppSettings(BaseSettings):
           client_id_env     -> env variable name
           client_id_default -> fallback value
         """
-        env_name = str(auth_config.get(f"{key}_env") or fallback_env)
-        configured_default = str(auth_config.get(f"{key}_default") or default or "")
-        return os.getenv(env_name, configured_default)
+        try:
+            env_name = str(auth_config.get(f"{key}_env") or fallback_env)
+            configured_default = str(auth_config.get(f"{key}_default") or default or "")
+            return os.getenv(env_name, configured_default)
+        except Exception as exc:
+            loguru_logger.error(f"Exception in {__name__}._configured_env: {exc}")
+            raise
 
     @staticmethod
     def _configured_value(
@@ -227,14 +247,22 @@ class AppSettings(BaseSettings):
         default: str = "",
     ) -> str:
         """Resolve direct value from api_requests.json auth section."""
-        return str(auth_config.get(key) or default or "")
+        try:
+            return str(auth_config.get(key) or default or "")
+        except Exception as exc:
+            loguru_logger.error(f"Exception in {__name__}._configured_value: {exc}")
+            raise
 
     @staticmethod
     def _mask(value: str, visible_chars: int = 8) -> str:
         """Mask sensitive values for logs."""
-        if not value:
-            return "NOT SET"
-        return f"SET ({value[:visible_chars]}...)"
+        try:
+            if not value:
+                return "NOT SET"
+            return f"SET ({value[:visible_chars]}...)"
+        except Exception as exc:
+            loguru_logger.error(f"Exception in {__name__}._mask: {exc}")
+            raise
 
     # ═══════════════════════════════════════════════════════════════
     # Logging
@@ -242,27 +270,31 @@ class AppSettings(BaseSettings):
 
     def log_startup_config(self) -> None:
         """Log sanitized configuration at startup."""
+        try:
 
-        logger.debug("[config] __file__        = %s", self.THIS_FILE)
-        logger.debug("[config] project root    = %s", self.ROOT_DIR)
-        logger.debug("[config] .env path       = %s", self.ENV_PATH)
-        logger.debug("[config] .env exists     = %s", self.ENV_PATH.exists())
-        logger.debug("[config] emr config path = %s", self.EMR_CONFIG_PATH)
-        logger.debug("[config] emr config exists = %s", self.EMR_CONFIG_PATH.exists())
+            logger.debug("[config] __file__        = %s", self.THIS_FILE)
+            logger.debug("[config] project root    = %s", self.ROOT_DIR)
+            logger.debug("[config] .env path       = %s", self.ENV_PATH)
+            logger.debug("[config] .env exists     = %s", self.ENV_PATH.exists())
+            logger.debug("[config] emr config path = %s", self.EMR_CONFIG_PATH)
+            logger.debug("[config] emr config exists = %s", self.EMR_CONFIG_PATH.exists())
 
-        logger.info("[config] EMR_NAME          = %s", self.EMR_NAME)
-        logger.info("[config] EMR_CLIENT_ID     = %s", self._mask(self.EMR_CLIENT_ID))
-        logger.info("[config] EMR_CLIENT_SECRET = %s", "SET (hidden)" if self.EMR_CLIENT_SECRET else "NOT SET")
-        logger.info("[config] EMR_REDIRECT_URI  = %s", self.EMR_REDIRECT_URI)
-        logger.info("[config] EMR_API_VERSION   = %s", self.EMR_API_VERSION)
-        logger.info("[config] EMR_AUTH_URL      = %s", self.EMR_AUTH_URL or "NOT SET")
-        logger.info("[config] EMR_TOKEN_URL     = %s", self.EMR_TOKEN_URL or "NOT SET")
-        logger.info("[config] EMR_API_BASE      = %s", self.EMR_API_BASE or "NOT SET")
-        logger.info("[config] FRONTEND_URL      = %s", self.FRONTEND_URL)
-        logger.info("[config] BACKEND_HOST      = %s", self.BACKEND_HOST)
-        logger.info("[config] BACKEND_PORT      = %s", self.BACKEND_PORT)
-        logger.info("[config] EMR_DAILY_LIMIT   = %s", self.EMR_DAILY_LIMIT)
-        logger.info("[config] EMR_MINUTE_LIMIT  = %s", self.EMR_MINUTE_LIMIT)
+            logger.info("[config] EMR_NAME          = %s", self.EMR_NAME)
+            logger.info("[config] EMR_CLIENT_ID     = %s", self._mask(self.EMR_CLIENT_ID))
+            logger.info("[config] EMR_CLIENT_SECRET = %s", "SET (hidden)" if self.EMR_CLIENT_SECRET else "NOT SET")
+            logger.info("[config] EMR_REDIRECT_URI  = %s", self.EMR_REDIRECT_URI)
+            logger.info("[config] EMR_API_VERSION   = %s", self.EMR_API_VERSION)
+            logger.info("[config] EMR_AUTH_URL      = %s", self.EMR_AUTH_URL or "NOT SET")
+            logger.info("[config] EMR_TOKEN_URL     = %s", self.EMR_TOKEN_URL or "NOT SET")
+            logger.info("[config] EMR_API_BASE      = %s", self.EMR_API_BASE or "NOT SET")
+            logger.info("[config] FRONTEND_URL      = %s", self.FRONTEND_URL)
+            logger.info("[config] BACKEND_HOST      = %s", self.BACKEND_HOST)
+            logger.info("[config] BACKEND_PORT      = %s", self.BACKEND_PORT)
+            logger.info("[config] EMR_DAILY_LIMIT   = %s", self.EMR_DAILY_LIMIT)
+            logger.info("[config] EMR_MINUTE_LIMIT  = %s", self.EMR_MINUTE_LIMIT)
+        except Exception as exc:
+            loguru_logger.error(f"Exception in {__name__}.log_startup_config: {exc}")
+            raise
 
     # ═══════════════════════════════════════════════════════════════
     # Validation
@@ -270,31 +302,35 @@ class AppSettings(BaseSettings):
 
     def validate(self) -> None:
         """Fail fast if required EMR credentials are missing."""
+        try:
 
-        emr_config = self._load_emr_config()
-        auth_config = emr_config.get("auth", {}) if isinstance(emr_config, dict) else {}
+            emr_config = self._load_emr_config()
+            auth_config = emr_config.get("auth", {}) if isinstance(emr_config, dict) else {}
 
-        client_id_env = str(auth_config.get("client_id_env") or "EMR_CLIENT_ID")
-        client_secret_env = str(auth_config.get("client_secret_env") or "EMR_CLIENT_SECRET")
+            client_id_env = str(auth_config.get("client_id_env") or "EMR_CLIENT_ID")
+            client_secret_env = str(auth_config.get("client_secret_env") or "EMR_CLIENT_SECRET")
 
-        missing = []
+            missing = []
 
-        if not self.EMR_CLIENT_ID:
-            missing.append(client_id_env)
+            if not self.EMR_CLIENT_ID:
+                missing.append(client_id_env)
 
-        if not self.EMR_CLIENT_SECRET:
-            missing.append(client_secret_env)
+            if not self.EMR_CLIENT_SECRET:
+                missing.append(client_secret_env)
 
-        if missing:
-            logger.critical("[config] MISSING required vars: %s", missing)
-            logger.critical("[config] Checked .env at: %s", self.ENV_PATH)
+            if missing:
+                logger.critical("[config] MISSING required vars: %s", missing)
+                logger.critical("[config] Checked .env at: %s", self.ENV_PATH)
 
-            raise EnvironmentError(
-                f"Missing required environment variables: {', '.join(missing)}\n"
-                f"Expected .env at: {self.ENV_PATH}"
-            )
+                raise EnvironmentError(
+                    f"Missing required environment variables: {', '.join(missing)}\n"
+                    f"Expected .env at: {self.ENV_PATH}"
+                )
 
-        logger.info("[config] validate() PASSED ✓")
+            logger.info("[config] validate() PASSED ✓")
+        except Exception as exc:
+            loguru_logger.error(f"Exception in {__name__}.validate: {exc}")
+            raise
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -331,4 +367,8 @@ EMR_MINUTE_LIMIT: int = settings.EMR_MINUTE_LIMIT
 
 def validate() -> None:
     """Backward-compatible validate function."""
-    settings.validate()
+    try:
+        settings.validate()
+    except Exception as exc:
+        loguru_logger.error(f"Exception in {__name__}.validate: {exc}")
+        raise

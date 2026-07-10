@@ -3,11 +3,12 @@ dryrun.py — /dryrun router
 Validates mapped records against DrChrono field requirements without writing any data.
 Fully dynamic: validates whatever resource keys exist in the session.
 """
+from loguru import logger as loguru_logger
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional
 from app.routes.upload import _SESSION
-from      app.push_data.api_request_client import (
+from app.push_data.api_request_client import (
     ApiRequestConfigError,
     _first_configured_value,
     get_api_request,
@@ -63,20 +64,53 @@ FIELD_ALIASES = {
 
 
 class DryRunRequest(BaseModel):
+    """Request body for dry-run validation.
+
+    Parameters:
+        resources: Optional list of resource keys to validate. Empty means all
+            loaded resources in the current upload session.
+
+    Use case:
+        Lets the UI validate all mapped data or only selected resources before
+        running the real EMR push.
+    """
     # Empty list means "run on all available resources"
     resources: List[str] = []
 
 
 def _rule_sources(rule) -> List:
-    if isinstance(rule, list):
-        return rule
-    if isinstance(rule, dict):
-        return rule.get("sources", [])
-    return []
+    """Extract source column/path rules from a config rule.
+
+    Parameters:
+        rule: Field source rule from ``api_requests.json``. It can be a list of
+            paths or a dict containing ``sources``.
+
+    Use case:
+        Lets validation understand the same source mapping format used by payload
+        building.
+    """
+    try:
+        if isinstance(rule, list):
+            return rule
+        if isinstance(rule, dict):
+            return rule.get("sources", [])
+        return []
+    except Exception as exc:
+        loguru_logger.error(f"Exception in {__name__}._rule_sources: {exc}")
+        raise
 
 
 def _required_from_config(resource_key: str) -> tuple[List[str], dict]:
-    """Return required fields and field source rules from api_requests.json."""
+    """Return required fields and field source rules from config.
+
+    Parameters:
+        resource_key: Uploaded resource key, for example ``allergies`` or
+            ``patients``.
+
+    Use case:
+        Aligns dry-run validation with the configured push payload contract while
+        ignoring context-only required fields like patient/doctor IDs.
+    """
     try:
         payload_cfg = get_api_request(resource_key).get("payload", {})
     except ApiRequestConfigError:
@@ -93,69 +127,94 @@ def _required_from_config(resource_key: str) -> tuple[List[str], dict]:
 
 
 def _validate_record(record: dict, required: List[str], field_sources: Optional[dict] = None) -> List[str]:
-    """Return list of missing/null required fields."""
-    errors = []
-    field_sources = field_sources or {}
-    for field in required:
-        sources = [
-            *_rule_sources(field_sources.get(field, [])),
-            *FIELD_ALIASES.get(field, [field]),
-        ]
-        val = _first_configured_value(record, sources, None)
-        if val is None or val == "" or val == []:
-            errors.append(f"Missing required field: '{field}'")
-    return errors
+    """Validate required fields for a single record.
+
+    Parameters:
+        record: Source or mapped record to validate.
+        required: Required payload fields after context-only fields are removed.
+        field_sources: Optional config mapping of payload fields to source paths.
+
+    Use case:
+        Checks whether a row has enough data to build the configured EMR payload.
+    """
+    try:
+        errors = []
+        field_sources = field_sources or {}
+        for field in required:
+            sources = [
+                *_rule_sources(field_sources.get(field, [])),
+                *FIELD_ALIASES.get(field, [field]),
+            ]
+            val = _first_configured_value(record, sources, None)
+            if val is None or val == "" or val == []:
+                errors.append(f"Missing required field: '{field}'")
+        return errors
+    except Exception as exc:
+        loguru_logger.error(f"Exception in {__name__}._validate_record: {exc}")
+        raise
 
 
 @router.post("/run")
 async def run_dryrun(req: DryRunRequest):
-    """Validate mapped records for selected resources (or all if none specified)."""
-    source = _SESSION.get("mapped") or _SESSION.get("resources")
-    if not source:
-        raise HTTPException(status_code=400, detail="No dataset loaded. Run /upload/load first.")
+    """Validate mapped records for selected resources.
 
-    # If no specific resources requested, validate all available ones
-    target_keys = req.resources if req.resources else list(source.keys())
+    Parameters:
+        req: Dry-run request containing optional resource filters.
 
-    total   = 0
-    passed  = 0
-    failed  = 0
-    details = {}
+    Use case:
+        Stage 5 validation endpoint. It reports pass/fail counts before data is
+        sent to the configured EMR.
+    """
+    try:
+        source = _SESSION.get("mapped") or _SESSION.get("resources")
+        if not source:
+            raise HTTPException(status_code=400, detail="No dataset loaded. Run /upload/load first.")
 
-    for key in target_keys:
-        records  = source.get(key, [])
-        required, field_sources = _required_from_config(key)  # empty list = no required checks
+        # If no specific resources requested, validate all available ones
+        target_keys = req.resources if req.resources else list(source.keys())
 
-        if not records:
-            details[key] = {"rate": 100, "errors": [], "count": 0}
-            continue
+        total   = 0
+        passed  = 0
+        failed  = 0
+        details = {}
 
-        record_errors = []
-        ok_count = 0
-        for r in records:
-            errs = _validate_record(r, required, field_sources)
-            if errs:
-                record_errors.extend(errs[:2])  # cap per record
-            else:
-                ok_count += 1
+        for key in target_keys:
+            records  = source.get(key, [])
+            required, field_sources = _required_from_config(key)  # empty list = no required checks
 
-        rate    = round((ok_count / len(records)) * 100)
-        total  += len(records)
-        passed += ok_count
-        failed += len(records) - ok_count
+            if not records:
+                details[key] = {"rate": 100, "errors": [], "count": 0}
+                continue
 
-        details[key] = {
-            "count":  len(records),
-            "passed": ok_count,
-            "failed": len(records) - ok_count,
-            "rate":   rate,
-            "errors": list(dict.fromkeys(record_errors))[:5],
+            record_errors = []
+            ok_count = 0
+            for r in records:
+                errs = _validate_record(r, required, field_sources)
+                if errs:
+                    record_errors.extend(errs[:2])  # cap per record
+                else:
+                    ok_count += 1
+
+            rate    = round((ok_count / len(records)) * 100)
+            total  += len(records)
+            passed += ok_count
+            failed += len(records) - ok_count
+
+            details[key] = {
+                "count":  len(records),
+                "passed": ok_count,
+                "failed": len(records) - ok_count,
+                "rate":   rate,
+                "errors": list(dict.fromkeys(record_errors))[:5],
+            }
+
+        return {
+            "status":  "complete",
+            "total":   total,
+            "passed":  passed,
+            "failed":  failed,
+            "details": details,
         }
-
-    return {
-        "status":  "complete",
-        "total":   total,
-        "passed":  passed,
-        "failed":  failed,
-        "details": details,
-    }
+    except Exception as exc:
+        loguru_logger.error(f"Exception in {__name__}.run_dryrun: {exc}")
+        raise

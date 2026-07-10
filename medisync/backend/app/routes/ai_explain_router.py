@@ -6,6 +6,7 @@ a structured AI-powered breakdown with actionable fix suggestions.
 Falls back to smart rule-based responses if no LLM key is set.
 """
 from __future__ import annotations
+from loguru import logger as loguru_logger
 import os
 import json
 import logging
@@ -21,22 +22,73 @@ router = APIRouter()
 # ── Request / Response models ──────────────────────────────────────────────────
 
 class ValidationError(BaseModel):
+    """
+    Validation issue detected for one mapped field.
+
+    Parameters:
+        field: Payload or source field that failed validation.
+        type: Validation category such as null_value, date_format, or terminology.
+        tag: UI/display tag for grouping the error.
+        detail: Human-readable validation detail.
+
+    Use case:
+        Sent from the validation stage so the explain route can produce field
+        fixes for partially mapped EMR payloads.
+    """
     field: str
     type: str          # null_value | date_format | terminology
     tag: str
     detail: str
 
 class FailedRecord(BaseModel):
+    """
+    One record that failed validation before pushing.
+
+    Parameters:
+        record_id: Source row or generated record identifier.
+        resource: Resource/API name being validated.
+        errors: Field-level validation failures for this record.
+
+    Use case:
+        Groups validation errors by record for AI/rule-based explanation in the UI.
+    """
     record_id: str
     resource: str
     errors: list[ValidationError] = []
 
 class ExplainValidationRequest(BaseModel):
+    """
+    Request body for explaining validation-stage failures.
+
+    Parameters:
+        resource: Resource/API name selected in the validation flow.
+        failed_records: Records that failed validation.
+        context: Optional text describing where the validation was run.
+
+    Use case:
+        Used by the frontend validation panel to ask the backend for actionable
+        mapping fixes before a live push.
+    """
     resource: str
     failed_records: list[FailedRecord]
     context: Optional[str] = None      # e.g. "CSV mapping stage"
 
 class ApiFailure(BaseModel):
+    """
+    One failed live API push response.
+
+    Parameters:
+        record_id: Source row or generated record identifier.
+        resource: Resource/API name that was pushed.
+        endpoint: Configured EMR endpoint that returned the failure.
+        http_status: HTTP status code returned by the EMR.
+        error: Short error message.
+        detail: Raw or expanded EMR error detail.
+
+    Use case:
+        Captures push failures so the UI can explain why a configured API call
+        failed and what payload field likely needs correction.
+    """
     record_id: str
     resource: str
     endpoint: str
@@ -45,10 +97,35 @@ class ApiFailure(BaseModel):
     detail: str
 
 class ExplainApiRequest(BaseModel):
+    """
+    Request body for explaining live API failures.
+
+    Parameters:
+        failures: Failed EMR API responses to analyze.
+        context: Optional text describing the push stage or resource group.
+
+    Use case:
+        Lets the frontend request a batch explanation after one or more records
+        fail during live EMR push.
+    """
     failures: list[ApiFailure]
     context: Optional[str] = None      # e.g. "DrChrono push stage"
 
 class Suggestion(BaseModel):
+    """
+    Suggested correction for one validation or API error.
+
+    Parameters:
+        field: Optional field name to update.
+        original_value: Optional original source value.
+        suggested_value: Optional replacement/default value.
+        action: Recommended action such as fix, skip, or default.
+        reason: Explanation for why the action is recommended.
+
+    Use case:
+        Returned to the UI so users know whether to update source data,
+        configuration mappings, or skip a record.
+    """
     field: Optional[str] = None
     original_value: Optional[str] = None
     suggested_value: Optional[str] = None
@@ -56,6 +133,21 @@ class Suggestion(BaseModel):
     reason: str
 
 class ExplainResponse(BaseModel):
+    """
+    Structured explanation returned by the AI/rule-based helper.
+
+    Parameters:
+        summary: Short summary of the failure set.
+        root_cause: Most likely source of the problem.
+        impact: What happens if the issue is not fixed.
+        suggestions: Field-level correction suggestions.
+        can_proceed: Whether the push can continue safely.
+        fixed_count: Number of errors that appear auto-fixable.
+        total_errors: Total error count considered.
+
+    Use case:
+        Powers the validation and push-failure explanation panels in the UI.
+    """
     summary: str
     root_cause: str
     impact: str
@@ -68,6 +160,20 @@ class ExplainResponse(BaseModel):
 # ── Mapping Analysis models ────────────────────────────────────────────────────
 
 class MappingAnalysisRequest(BaseModel):
+    """
+    Request body for analyzing partial resource mapping.
+
+    Parameters:
+        resource_name: FHIR/resource/API name being analyzed.
+        fields_present: Required fields already mapped.
+        fields_missing: Required fields still missing.
+        total_fields: Total required field count for the resource.
+        raw_values: Optional raw FHIR/source values used for derivation hints.
+
+    Use case:
+        Helps the UI explain partial mappings and show which configuration
+        columns or defaults are needed before pushing to an EMR.
+    """
     resource_name: str                         # e.g. "MedicationRequest"
     fields_present: list[str] = []             # e.g. ["patient", "name", "appointment"]
     fields_missing: list[str] = []             # e.g. ["doctor"]
@@ -76,6 +182,19 @@ class MappingAnalysisRequest(BaseModel):
 
 
 class FieldFix(BaseModel):
+    """
+    Recommended fix for one missing mapped field.
+
+    Parameters:
+        field: Internal payload field that is missing.
+        drchrono_field_name: EMR display/API field name for the missing value.
+        derivation_strategy: How the backend or user can derive the value.
+        example_value: Concrete example of an acceptable value.
+        auto_fixable: Whether code/config can derive it automatically.
+
+    Use case:
+        Displays actionable mapping remediation for partial validation results.
+    """
     field: str
     drchrono_field_name: str
     derivation_strategy: str    # how to obtain/default the value
@@ -84,6 +203,23 @@ class FieldFix(BaseModel):
 
 
 class MappingAnalysisResponse(BaseModel):
+    """
+    Response body for partial mapping analysis.
+
+    Parameters:
+        resource_name: Resource/API name analyzed.
+        mapping_status: Fully Mapped, Partial Mapping, or No Mapping.
+        missing_count: Number of missing required fields.
+        total_fields: Total required field count.
+        missing_field_fixes: Suggested fixes for missing fields.
+        safe_to_push: Whether current mapping can be pushed safely.
+        recommended_action: Next action for the user or backend.
+        analysis: Human-readable summary paragraph.
+
+    Use case:
+        Feeds the validation UI with a clear explanation of why a resource is
+        partially mapped and how to fix it through configuration or source data.
+    """
     resource_name: str
     mapping_status: str         # "Fully Mapped" | "Partial Mapping" | "No Mapping"
     missing_count: int
@@ -169,196 +305,208 @@ _HTTP_FIXES = {
 
 def _explain_validation_rule_based(req: ExplainValidationRequest) -> ExplainResponse:
     """Generate a rich, rule-based AI explanation for CSV mapping validation errors."""
-    all_errors = [e for rec in req.failed_records for e in rec.errors]
-    total = len(all_errors)
+    try:
+        all_errors = [e for rec in req.failed_records for e in rec.errors]
+        total = len(all_errors)
 
-    null_errs  = [e for e in all_errors if e.type == "null_value"]
-    date_errs  = [e for e in all_errors if e.type == "date_format"]
-    term_errs  = [e for e in all_errors if e.type == "terminology"]
+        null_errs  = [e for e in all_errors if e.type == "null_value"]
+        date_errs  = [e for e in all_errors if e.type == "date_format"]
+        term_errs  = [e for e in all_errors if e.type == "terminology"]
 
-    # Build root cause sentence
-    causes = []
-    if null_errs:  causes.append(f"{len(null_errs)} missing/null required fields")
-    if date_errs:  causes.append(f"{len(date_errs)} incorrectly formatted dates")
-    if term_errs:  causes.append(f"{len(term_errs)} terminology description-instead-of-code issues")
-    root_cause = "Detected: " + "; ".join(causes) + f" across {len(req.failed_records)} record(s) in '{req.resource}'."
+        # Build root cause sentence
+        causes = []
+        if null_errs:  causes.append(f"{len(null_errs)} missing/null required fields")
+        if date_errs:  causes.append(f"{len(date_errs)} incorrectly formatted dates")
+        if term_errs:  causes.append(f"{len(term_errs)} terminology description-instead-of-code issues")
+        root_cause = "Detected: " + "; ".join(causes) + f" across {len(req.failed_records)} record(s) in '{req.resource}'."
 
-    # Build suggestions
-    suggestions: list[Suggestion] = []
-    seen_fields = set()
+        # Build suggestions
+        suggestions: list[Suggestion] = []
+        seen_fields = set()
 
-    for e in null_errs:
-        f = e.field.lower().replace(" ", "_")
-        if f in seen_fields: continue
-        seen_fields.add(f)
-        fix_info = _NULL_FIXES.get(f, _NULL_FIXES.get(f.split("_")[-1], None))
-        if fix_info:
-            sug_val, reason = fix_info
+        for e in null_errs:
+            f = e.field.lower().replace(" ", "_")
+            if f in seen_fields: continue
+            seen_fields.add(f)
+            fix_info = _NULL_FIXES.get(f, _NULL_FIXES.get(f.split("_")[-1], None))
+            if fix_info:
+                sug_val, reason = fix_info
+                suggestions.append(Suggestion(
+                    field=e.field,
+                    original_value=None,
+                    suggested_value=sug_val if sug_val else None,
+                    action="fix" if sug_val else "skip",
+                    reason=reason,
+                ))
+            else:
+                suggestions.append(Suggestion(
+                    field=e.field,
+                    action="fix",
+                    reason=f"Field '{e.field}' is required by DrChrono's {req.resource} endpoint. Add this column to your CSV.",
+                ))
+
+        if date_errs:
+            unique_date_fields = list({e.field for e in date_errs})[:3]
             suggestions.append(Suggestion(
-                field=e.field,
-                original_value=None,
-                suggested_value=sug_val if sug_val else None,
-                action="fix" if sug_val else "skip",
-                reason=reason,
-            ))
-        else:
-            suggestions.append(Suggestion(
-                field=e.field,
+                field=", ".join(unique_date_fields),
                 action="fix",
-                reason=f"Field '{e.field}' is required by DrChrono's {req.resource} endpoint. Add this column to your CSV.",
+                reason=_DATE_FIX_HINT,
             ))
 
-    if date_errs:
-        unique_date_fields = list({e.field for e in date_errs})[:3]
-        suggestions.append(Suggestion(
-            field=", ".join(unique_date_fields),
-            action="fix",
-            reason=_DATE_FIX_HINT,
-        ))
+        if term_errs:
+            unique_term_fields = list({e.field for e in term_errs})[:3]
+            suggestions.append(Suggestion(
+                field=", ".join(unique_term_fields),
+                action="fix",
+                reason=_TERM_FIX_HINT,
+            ))
 
-    if term_errs:
-        unique_term_fields = list({e.field for e in term_errs})[:3]
-        suggestions.append(Suggestion(
-            field=", ".join(unique_term_fields),
-            action="fix",
-            reason=_TERM_FIX_HINT,
-        ))
+        auto_fixable = len([s for s in suggestions if s.action == "fix" and s.suggested_value])
+        can_proceed  = len(null_errs) == 0 or all(
+            _NULL_FIXES.get(e.field.lower(), ("", ""))[0] for e in null_errs
+        )
 
-    auto_fixable = len([s for s in suggestions if s.action == "fix" and s.suggested_value])
-    can_proceed  = len(null_errs) == 0 or all(
-        _NULL_FIXES.get(e.field.lower(), ("", ""))[0] for e in null_errs
-    )
+        summary = (
+            f"Found {total} issue(s) in {len(req.failed_records)} '{req.resource}' record(s). "
+            f"{auto_fixable} field(s) can be auto-corrected with safe defaults. "
+            f"{'You can still proceed — errors are non-blocking.' if can_proceed else 'Fix required fields before pushing to DrChrono.'}"
+        )
 
-    summary = (
-        f"Found {total} issue(s) in {len(req.failed_records)} '{req.resource}' record(s). "
-        f"{auto_fixable} field(s) can be auto-corrected with safe defaults. "
-        f"{'You can still proceed — errors are non-blocking.' if can_proceed else 'Fix required fields before pushing to DrChrono.'}"
-    )
+        impact = (
+            f"If pushed as-is, DrChrono will reject records with null required fields (HTTP 422). "
+            f"Date format issues cause HTTP 400. Terminology descriptions are accepted but may cause "
+            f"incorrect clinical coding. Fixing all issues ensures 100% push success rate."
+        )
 
-    impact = (
-        f"If pushed as-is, DrChrono will reject records with null required fields (HTTP 422). "
-        f"Date format issues cause HTTP 400. Terminology descriptions are accepted but may cause "
-        f"incorrect clinical coding. Fixing all issues ensures 100% push success rate."
-    )
-
-    return ExplainResponse(
-        summary=summary,
-        root_cause=root_cause,
-        impact=impact,
-        suggestions=suggestions,
-        can_proceed=can_proceed,
-        fixed_count=auto_fixable,
-        total_errors=total,
-    )
+        return ExplainResponse(
+            summary=summary,
+            root_cause=root_cause,
+            impact=impact,
+            suggestions=suggestions,
+            can_proceed=can_proceed,
+            fixed_count=auto_fixable,
+            total_errors=total,
+        )
+    except Exception as exc:
+        loguru_logger.error(f"Exception in {__name__}._explain_validation_rule_based: {exc}")
+        raise
 
 
 def _explain_api_rule_based(req: ExplainApiRequest) -> ExplainResponse:
     """Generate a rich, rule-based AI explanation for DrChrono API push failures."""
-    total = len(req.failures)
-    by_status: dict[int, list[ApiFailure]] = {}
-    for f in req.failures:
-        by_status.setdefault(f.http_status, []).append(f)
+    try:
+        total = len(req.failures)
+        by_status: dict[int, list[ApiFailure]] = {}
+        for f in req.failures:
+            by_status.setdefault(f.http_status, []).append(f)
 
-    dominant_status = max(by_status, key=lambda k: len(by_status[k])) if by_status else 0
-    info = _HTTP_FIXES.get(dominant_status, {
-        "summary": f"HTTP {dominant_status} errors from DrChrono API",
-        "root_cause": "Unknown API error. Check DrChrono API documentation.",
-        "fix": "Review request payload and authentication.",
-    })
+        dominant_status = max(by_status, key=lambda k: len(by_status[k])) if by_status else 0
+        info = _HTTP_FIXES.get(dominant_status, {
+            "summary": f"HTTP {dominant_status} errors from DrChrono API",
+            "root_cause": "Unknown API error. Check DrChrono API documentation.",
+            "fix": "Review request payload and authentication.",
+        })
 
-    suggestions: list[Suggestion] = []
-    seen_statuses = set()
-    for status, fails in sorted(by_status.items()):
-        if status in seen_statuses: continue
-        seen_statuses.add(status)
-        fix_info = _HTTP_FIXES.get(status, {})
-        resources_affected = list({f.resource for f in fails})
-        suggestions.append(Suggestion(
-            field=f"HTTP {status} — affects: {', '.join(resources_affected)}",
-            action="fix",
-            reason=fix_info.get("fix", "Review the request and retry."),
-        ))
+        suggestions: list[Suggestion] = []
+        seen_statuses = set()
+        for status, fails in sorted(by_status.items()):
+            if status in seen_statuses: continue
+            seen_statuses.add(status)
+            fix_info = _HTTP_FIXES.get(status, {})
+            resources_affected = list({f.resource for f in fails})
+            suggestions.append(Suggestion(
+                field=f"HTTP {status} — affects: {', '.join(resources_affected)}",
+                action="fix",
+                reason=fix_info.get("fix", "Review the request and retry."),
+            ))
 
-    # 409 conflicts — suggest PATCH
-    if 409 in by_status:
-        endpoints = list({f.endpoint for f in by_status[409]})
-        suggestions.append(Suggestion(
-            field="Duplicate records",
-            action="skip",
-            reason=f"These records already exist in DrChrono. Consider using PATCH on: {', '.join(endpoints)}",
-        ))
+        # 409 conflicts — suggest PATCH
+        if 409 in by_status:
+            endpoints = list({f.endpoint for f in by_status[409]})
+            suggestions.append(Suggestion(
+                field="Duplicate records",
+                action="skip",
+                reason=f"These records already exist in DrChrono. Consider using PATCH on: {', '.join(endpoints)}",
+            ))
 
-    # Rate limit — actionable
-    if 429 in by_status:
-        suggestions.append(Suggestion(
-            field="Rate limiting",
-            action="fix",
-            reason="Add throttle delay: 60ms between requests, max 29/min. Retry after 60 seconds.",
-        ))
+        # Rate limit — actionable
+        if 429 in by_status:
+            suggestions.append(Suggestion(
+                field="Rate limiting",
+                action="fix",
+                reason="Add throttle delay: 60ms between requests, max 29/min. Retry after 60 seconds.",
+            ))
 
-    groups = [f"HTTP {s}: {len(f)} record(s)" for s, f in by_status.items()]
-    root_cause = info["root_cause"] + f" Breakdown — {'; '.join(groups)}."
+        groups = [f"HTTP {s}: {len(f)} record(s)" for s, f in by_status.items()]
+        root_cause = info["root_cause"] + f" Breakdown — {'; '.join(groups)}."
 
-    can_proceed = dominant_status in (409, 429)  # these are retryable
-    fixable = len([s for s in suggestions if s.action == "fix"])
+        can_proceed = dominant_status in (409, 429)  # these are retryable
+        fixable = len([s for s in suggestions if s.action == "fix"])
 
-    summary = (
-        f"{total} API call(s) failed during DrChrono push. "
-        f"Dominant error: {info['summary']}. "
-        f"{fixable} actionable fix(es) identified."
-    )
+        summary = (
+            f"{total} API call(s) failed during DrChrono push. "
+            f"Dominant error: {info['summary']}. "
+            f"{fixable} actionable fix(es) identified."
+        )
 
-    impact = (
-        f"Failed records were NOT saved to DrChrono. "
-        f"{'These errors are retryable — fix and push again.' if can_proceed else 'Manual data correction required before retry.'} "
-        f"Successful records in the same batch were saved normally."
-    )
+        impact = (
+            f"Failed records were NOT saved to DrChrono. "
+            f"{'These errors are retryable — fix and push again.' if can_proceed else 'Manual data correction required before retry.'} "
+            f"Successful records in the same batch were saved normally."
+        )
 
-    return ExplainResponse(
-        summary=summary,
-        root_cause=root_cause,
-        impact=impact,
-        suggestions=suggestions,
-        can_proceed=can_proceed,
-        fixed_count=0,
-        total_errors=total,
-    )
+        return ExplainResponse(
+            summary=summary,
+            root_cause=root_cause,
+            impact=impact,
+            suggestions=suggestions,
+            can_proceed=can_proceed,
+            fixed_count=0,
+            total_errors=total,
+        )
+    except Exception as exc:
+        loguru_logger.error(f"Exception in {__name__}._explain_api_rule_based: {exc}")
+        raise
 
 
 # ── Optional LLM enhancement ───────────────────────────────────────────────────
 
 async def _try_llm_enhance(base: ExplainResponse, context_str: str) -> ExplainResponse:
     """Try to enrich the response with an LLM if GEMINI_API_KEY is configured."""
-    api_key = os.getenv("GEMINI_API_KEY", "")
-    if not api_key:
-        return base
-
     try:
-        prompt = (
-            f"You are a DrChrono EHR integration expert. A developer encountered these errors:\n\n"
-            f"Context: {context_str}\n"
-            f"Summary: {base.summary}\n"
-            f"Root Cause: {base.root_cause}\n\n"
-            f"In 2 sentences max, provide one additional expert tip that goes beyond the basic fix. "
-            f"Focus on prevention. Be specific to DrChrono API v4. Do not repeat what was already said."
-        )
-        client = await HTTPClientManager.get_async_http_client()
-        resp = await client.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}",
-            json={"contents": [{"parts": [{"text": prompt}]}]},
-            timeout=8,
-        )
-        if resp.status_code == 200:
-            text = resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-            base.suggestions.append(Suggestion(
-                field="💡 AI Expert Tip",
-                action="fix",
-                reason=text,
-            ))
-    except Exception as e:
-        log.debug(f"LLM enhance skipped: {e}")
+        api_key = os.getenv("GEMINI_API_KEY", "")
+        if not api_key:
+            return base
 
-    return base
+        try:
+            prompt = (
+                f"You are a DrChrono EHR integration expert. A developer encountered these errors:\n\n"
+                f"Context: {context_str}\n"
+                f"Summary: {base.summary}\n"
+                f"Root Cause: {base.root_cause}\n\n"
+                f"In 2 sentences max, provide one additional expert tip that goes beyond the basic fix. "
+                f"Focus on prevention. Be specific to DrChrono API v4. Do not repeat what was already said."
+            )
+            client = await HTTPClientManager.get_async_http_client()
+            resp = await client.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}",
+                json={"contents": [{"parts": [{"text": prompt}]}]},
+                timeout=8,
+            )
+            if resp.status_code == 200:
+                text = resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+                base.suggestions.append(Suggestion(
+                    field="💡 AI Expert Tip",
+                    action="fix",
+                    reason=text,
+                ))
+        except Exception as e:
+            log.debug(f"LLM enhance skipped: {e}")
+
+        return base
+    except Exception as exc:
+        loguru_logger.error(f"Exception in {__name__}._try_llm_enhance: {exc}")
+        raise
 
 
 # ── Mapping analysis engine ────────────────────────────────────────────────────
@@ -423,106 +571,110 @@ _DERIVATION_STRATEGIES: dict[str, tuple[str, str, bool]] = {
 
 def _analyze_mapping_rule_based(req: MappingAnalysisRequest) -> MappingAnalysisResponse:
     """Core engine: applies 1-missing vs 2+-missing logic and builds structured response."""
-    missing = req.fields_missing
-    n_missing = len(missing)
-    total = req.total_fields or (len(req.fields_present) + n_missing)
+    try:
+        missing = req.fields_missing
+        n_missing = len(missing)
+        total = req.total_fields or (len(req.fields_present) + n_missing)
 
-    # ── Mapping status ─────────────────────────────────
-    if n_missing == 0:
-        status = "Fully Mapped"
-    elif n_missing == 1:
-        status = "Partial Mapping"
-    else:
-        status = "No Mapping"
+        # ── Mapping status ─────────────────────────────────
+        if n_missing == 0:
+            status = "Fully Mapped"
+        elif n_missing == 1:
+            status = "Partial Mapping"
+        else:
+            status = "No Mapping"
 
-    # ── Build per-field fixes ──────────────────────────
-    fixes: list[FieldFix] = []
-    for field in missing:
-        key = field.lower().replace(" ", "_").replace("-", "_")
-        drc_name = _DRCHRONO_FIELD_NAMES.get(key, f"{field} (see DrChrono API docs)")
-        strategy, example, auto_fix = _DERIVATION_STRATEGIES.get(
-            key,
-            (f"No auto-derivation available. '{field}' must be supplied by the data source.", "N/A", False)
-        )
-        fixes.append(FieldFix(
-            field=field,
-            drchrono_field_name=drc_name,
-            derivation_strategy=strategy,
-            example_value=example,
-            auto_fixable=auto_fix,
-        ))
+        # ── Build per-field fixes ──────────────────────────
+        fixes: list[FieldFix] = []
+        for field in missing:
+            key = field.lower().replace(" ", "_").replace("-", "_")
+            drc_name = _DRCHRONO_FIELD_NAMES.get(key, f"{field} (see DrChrono API docs)")
+            strategy, example, auto_fix = _DERIVATION_STRATEGIES.get(
+                key,
+                (f"No auto-derivation available. '{field}' must be supplied by the data source.", "N/A", False)
+            )
+            fixes.append(FieldFix(
+                field=field,
+                drchrono_field_name=drc_name,
+                derivation_strategy=strategy,
+                example_value=example,
+                auto_fixable=auto_fix,
+            ))
 
-    # ── Safe to push / Recommended action ─────────────
-    all_auto_fixable = all(f.auto_fixable for f in fixes)
+        # ── Safe to push / Recommended action ─────────────
+        all_auto_fixable = all(f.auto_fixable for f in fixes)
 
-    if n_missing == 0:
-        safe_to_push = True
-        action = "Apply Fix"          # Nothing to fix — just push
-        action = "Apply Fix"          # (reusing label: "proceed")
-    elif n_missing == 1:
-        safe_to_push = fixes[0].auto_fixable
-        action = "Apply Fix" if fixes[0].auto_fixable else "Review Source"
-    else:
-        safe_to_push = False
-        action = "Review Source" if not all_auto_fixable else "Apply Fix"
-        # If all 2+ are system-resolvable IDs, we can still auto-fix
-        if all_auto_fixable:
+        if n_missing == 0:
             safe_to_push = True
-            action = "Apply Fix"
+            action = "Apply Fix"          # Nothing to fix — just push
+            action = "Apply Fix"          # (reusing label: "proceed")
+        elif n_missing == 1:
+            safe_to_push = fixes[0].auto_fixable
+            action = "Apply Fix" if fixes[0].auto_fixable else "Review Source"
         else:
-            action = "Skip Resource" if n_missing >= 3 else "Review Source"
+            safe_to_push = False
+            action = "Review Source" if not all_auto_fixable else "Apply Fix"
+            # If all 2+ are system-resolvable IDs, we can still auto-fix
+            if all_auto_fixable:
+                safe_to_push = True
+                action = "Apply Fix"
+            else:
+                action = "Skip Resource" if n_missing >= 3 else "Review Source"
 
-    # ── Human-readable analysis paragraph ─────────────
-    if n_missing == 0:
-        analysis = (
-            f"{req.resource_name} is fully mapped — all {total} required DrChrono fields "
-            f"are present and correctly valued. This resource is ready for EHR push."
+        # ── Human-readable analysis paragraph ─────────────
+        if n_missing == 0:
+            analysis = (
+                f"{req.resource_name} is fully mapped — all {total} required DrChrono fields "
+                f"are present and correctly valued. This resource is ready for EHR push."
+            )
+        elif n_missing == 1:
+            f0 = fixes[0]
+            if f0.auto_fixable:
+                analysis = (
+                    f"{req.resource_name} has 1 missing field: '{f0.drchrono_field_name}'. "
+                    f"This can be auto-derived: {f0.derivation_strategy}. "
+                    f"Example value: {f0.example_value}. "
+                    f"Proceed with warning — the system will inject this value before push."
+                )
+            else:
+                analysis = (
+                    f"{req.resource_name} has 1 missing field: '{f0.drchrono_field_name}'. "
+                    f"This field cannot be auto-derived and must come from the source data. "
+                    f"{f0.derivation_strategy}. "
+                    f"Resolve at the data source level before pushing to EHR."
+                )
+        else:
+            missing_names = ", ".join(f"'{f.drchrono_field_name}'" for f in fixes)
+            if all_auto_fixable:
+                analysis = (
+                    f"{req.resource_name} has {n_missing} missing fields: {missing_names}. "
+                    f"All missing fields are runtime IDs that can be resolved via DrChrono prerequisite "
+                    f"lookup endpoints. Call GET /mapper/prerequisites to populate the context dict, "
+                    f"then re-run the transform. No source data change required."
+                )
+            else:
+                non_auto = [f for f in fixes if not f.auto_fixable]
+                analysis = (
+                    f"{req.resource_name} has {n_missing} missing fields: {missing_names}. "
+                    f"{len(non_auto)} of these cannot be auto-derived and must be resolved at the "
+                    f"data source level: {', '.join(f.field for f in non_auto)}. "
+                    f"Do not attempt a workaround — the source record must be corrected before "
+                    f"this resource can be pushed to DrChrono EHR."
+                )
+
+        return MappingAnalysisResponse(
+            resource_name=req.resource_name,
+            mapping_status=status,
+            missing_count=n_missing,
+            total_fields=total,
+            missing_field_fixes=fixes,
+            safe_to_push=safe_to_push,
+            recommended_action=action,
+            analysis=analysis,
         )
-    elif n_missing == 1:
-        f0 = fixes[0]
-        if f0.auto_fixable:
-            analysis = (
-                f"{req.resource_name} has 1 missing field: '{f0.drchrono_field_name}'. "
-                f"This can be auto-derived: {f0.derivation_strategy}. "
-                f"Example value: {f0.example_value}. "
-                f"Proceed with warning — the system will inject this value before push."
-            )
-        else:
-            analysis = (
-                f"{req.resource_name} has 1 missing field: '{f0.drchrono_field_name}'. "
-                f"This field cannot be auto-derived and must come from the source data. "
-                f"{f0.derivation_strategy}. "
-                f"Resolve at the data source level before pushing to EHR."
-            )
-    else:
-        missing_names = ", ".join(f"'{f.drchrono_field_name}'" for f in fixes)
-        if all_auto_fixable:
-            analysis = (
-                f"{req.resource_name} has {n_missing} missing fields: {missing_names}. "
-                f"All missing fields are runtime IDs that can be resolved via DrChrono prerequisite "
-                f"lookup endpoints. Call GET /mapper/prerequisites to populate the context dict, "
-                f"then re-run the transform. No source data change required."
-            )
-        else:
-            non_auto = [f for f in fixes if not f.auto_fixable]
-            analysis = (
-                f"{req.resource_name} has {n_missing} missing fields: {missing_names}. "
-                f"{len(non_auto)} of these cannot be auto-derived and must be resolved at the "
-                f"data source level: {', '.join(f.field for f in non_auto)}. "
-                f"Do not attempt a workaround — the source record must be corrected before "
-                f"this resource can be pushed to DrChrono EHR."
-            )
-
-    return MappingAnalysisResponse(
-        resource_name=req.resource_name,
-        mapping_status=status,
-        missing_count=n_missing,
-        total_fields=total,
-        missing_field_fixes=fixes,
-        safe_to_push=safe_to_push,
-        recommended_action=action,
-        analysis=analysis,
-    )
+    except Exception as exc:
+        loguru_logger.error(f"Exception in {__name__}._analyze_mapping_rule_based: {exc}")
+        raise
 
 
 # ── Routes ─────────────────────────────────────────────────────────────────────
@@ -530,19 +682,27 @@ def _analyze_mapping_rule_based(req: MappingAnalysisRequest) -> MappingAnalysisR
 @router.post("/explain/validation", response_model=ExplainResponse)
 async def explain_validation(req: ExplainValidationRequest):
     """Explain CSV mapping validation errors with AI-powered breakdown and fix suggestions."""
-    result = _explain_validation_rule_based(req)
-    context = f"CSV mapping validation for '{req.resource}' resource"
-    result = await _try_llm_enhance(result, context)
-    return result
+    try:
+        result = _explain_validation_rule_based(req)
+        context = f"CSV mapping validation for '{req.resource}' resource"
+        result = await _try_llm_enhance(result, context)
+        return result
+    except Exception as exc:
+        loguru_logger.error(f"Exception in {__name__}.explain_validation: {exc}")
+        raise
 
 
 @router.post("/explain/api", response_model=ExplainResponse)
 async def explain_api_failures(req: ExplainApiRequest):
     """Explain DrChrono API push failures with AI-powered root cause analysis."""
-    result = _explain_api_rule_based(req)
-    context = f"DrChrono API push failures across {len(set(f.resource for f in req.failures))} resource type(s)"
-    result = await _try_llm_enhance(result, context)
-    return result
+    try:
+        result = _explain_api_rule_based(req)
+        context = f"DrChrono API push failures across {len(set(f.resource for f in req.failures))} resource type(s)"
+        result = await _try_llm_enhance(result, context)
+        return result
+    except Exception as exc:
+        loguru_logger.error(f"Exception in {__name__}.explain_api_failures: {exc}")
+        raise
 
 
 @router.post("/analyze-mapping", response_model=MappingAnalysisResponse)
@@ -563,20 +723,28 @@ async def analyze_mapping(req: MappingAnalysisRequest):
         total_fields:    Total required field count (optional — computed if omitted)
         raw_values:      Raw FHIR values for context (optional)
     """
-    return _analyze_mapping_rule_based(req)
+    try:
+        return _analyze_mapping_rule_based(req)
+    except Exception as exc:
+        loguru_logger.error(f"Exception in {__name__}.analyze_mapping: {exc}")
+        raise
 
 
 @router.get("/status")
 async def ai_status():
     """Check if AI features are available."""
-    has_llm = bool(os.getenv("GEMINI_API_KEY", ""))
-    return {
-        "ai_module": "active",
-        "llm_enhanced": has_llm,
-        "mode": "gemini-2.0-flash" if has_llm else "rule-based",
-        "endpoints": [
-            "/ai/explain/validation",
-            "/ai/explain/api",
-            "/ai/analyze-mapping",
-        ],
-    }
+    try:
+        has_llm = bool(os.getenv("GEMINI_API_KEY", ""))
+        return {
+            "ai_module": "active",
+            "llm_enhanced": has_llm,
+            "mode": "gemini-2.0-flash" if has_llm else "rule-based",
+            "endpoints": [
+                "/ai/explain/validation",
+                "/ai/explain/api",
+                "/ai/analyze-mapping",
+            ],
+        }
+    except Exception as exc:
+        loguru_logger.error(f"Exception in {__name__}.ai_status: {exc}")
+        raise

@@ -3,6 +3,7 @@ MediSync FastAPI Backend — main.py
 Entry point: loads config, registers routers, configures CORS.
 """
 
+from loguru import logger as loguru_logger
 # logger first — initializes the rotating file handler before anything else logs.
 from      app.core.logging import logger as _logger  # noqa: F401
 # config must be imported next — it loads .env at module level
@@ -67,18 +68,35 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     """Close shared outbound HTTP connections."""
-    await HTTPClientManager.close_all()
+    try:
+        await HTTPClientManager.close_all()
+    except Exception as exc:
+        loguru_logger.error(f"Exception in {__name__}.shutdown_event: {exc}")
+        raise
 
 
 @app.get("/", tags=["Health"])
 async def health_check():
-    return {
-        "status":        "ok",
-        "service":       "MediSync API",
-        "version":       "1.0.0",
-        "ehr_connected": bool(emr_auth_client.value("client_id")),
-        "emr_name":      emr_auth_client.emr_name,
-    }
+    """Return basic backend and EMR configuration health.
+
+    Parameters:
+        None.
+
+    Use case:
+        Simple readiness endpoint for confirming the API is running and whether
+        EMR client configuration is present.
+    """
+    try:
+        return {
+            "status":        "ok",
+            "service":       "MediSync API",
+            "version":       "1.0.0",
+            "ehr_connected": bool(emr_auth_client.value("client_id")),
+            "emr_name":      emr_auth_client.emr_name,
+        }
+    except Exception as exc:
+        loguru_logger.error(f"Exception in {__name__}.health_check: {exc}")
+        raise
 
 
 if __name__ == "__main__":
